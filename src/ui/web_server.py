@@ -222,12 +222,34 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .combo-item:hover,.combo-item.active { background:var(--card); color:var(--primary); }
 .combo-item .combo-hint { font-size:11px; color:var(--muted); margin-left:auto; }
 .combo-item .combo-desc { font-size:11px; color:var(--muted); }
-/* 执行模式切换 */
-.mode-toggle { display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
-.mode-btn { padding:8px 14px; font-size:13px; background:transparent; border:none; color:var(--muted); cursor:pointer; transition:all .2s; white-space:nowrap; border-right:1px solid var(--border); }
-.mode-btn:last-child { border-right:none; }
-.mode-btn:hover { color:var(--text); background:rgba(88,166,255,.05); }
-.mode-btn.active { background:rgba(88,166,255,.12); color:var(--primary); font-weight:bold; }
+/* 执行模式切换 — 分段胶囊控件 */
+.mode-toggle {
+  display: flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 3px;
+}
+.mode-btn {
+  flex: 1;
+  padding: 7px 12px;
+  font-size: 13px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+.mode-btn:hover { color: var(--text); }
+.mode-btn.active {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(88,166,255,.35);
+}
 /* 编排实时面板 */
 .orch-live-container { margin:0 0 12px; }
 .orch-flow { display:flex; flex-direction:column; gap:8px; }
@@ -2454,15 +2476,20 @@ def _get_agent_persist_executor():
 
 async def _persist_agent_to_db(name: str, model: str, provider: str, skills: list[str], description: str):
     """将 Agent 配置写入 MySQL agent_configs 表"""
-    if not _db_initialized:
-        return
-    import asyncio as _asyncio_for_db
+    import logging as _logging
+    _log = _logging.getLogger("smart_agent.web")
 
-    async def _save():
-        from src.infrastructure.database import _session_factory
-        if _session_factory is None:
-            return
-        from src.infrastructure.models import AgentConfigModel
+    if not _db_initialized:
+        _log.warning(f"Agent '{name}' 未持久化: 数据库未初始化 (_db_initialized=False)")
+        return
+
+    from src.infrastructure.database import _session_factory
+    if _session_factory is None:
+        _log.warning(f"Agent '{name}' 未持久化: _session_factory 为 None")
+        return
+
+    from src.infrastructure.models import AgentConfigModel
+    try:
         async with _session_factory() as session:
             existing = await session.get(AgentConfigModel, name)
             if existing:
@@ -2470,18 +2497,17 @@ async def _persist_agent_to_db(name: str, model: str, provider: str, skills: lis
                 existing.provider = provider
                 existing.skills = skills
                 existing.description = description
+                _log.info(f"Agent '{name}' 已更新到数据库")
             else:
                 cfg = AgentConfigModel(
                     name=name, model=model, provider=provider,
                     skills=skills, description=description,
                 )
                 session.add(cfg)
+                _log.info(f"Agent '{name}' 已写入数据库")
             await session.commit()
-
-    try:
-        await _save()
-    except Exception:
-        pass
+    except Exception as e:
+        _log.error(f"Agent '{name}' 持久化到数据库失败: {e}", exc_info=True)
 
 
 async def _restore_agents(tm):
@@ -2715,6 +2741,20 @@ async def api_delete_agent(name: str):
         return JSONResponse({"ok": False, "error": "Agent 未找到"}, status_code=404)
 
     tm.unregister_agent(name)
+
+    # 同时从数据库删除，防止重启后恢复
+    try:
+        from src.infrastructure.database import _session_factory
+        from src.infrastructure.models import AgentConfigModel
+        if _session_factory is not None:
+            async with _session_factory() as session:
+                cfg = await session.get(AgentConfigModel, name)
+                if cfg:
+                    await session.delete(cfg)
+                    await session.commit()
+    except Exception:
+        pass
+
     return {"ok": True}
 
 

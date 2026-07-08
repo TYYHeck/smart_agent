@@ -271,9 +271,9 @@ class Orchestrator:
         # 注册到 TaskManager 历史（让前端任务列表/详情可查看）
         task.status = TaskStatus.RUNNING
         task.started_at = datetime.now()
-        with self._tm._lock:
-            self._tm._history.append(task)
-        self._tm._persist_task(task)
+        with self.tm._lock:
+            self.tm._history.append(task)
+        self.tm._persist_task(task)
 
         # 日志
         logger.info(
@@ -309,8 +309,8 @@ class Orchestrator:
         finally:
             task.finished_at = datetime.now()
             # 持久化任务结果
-            self._tm._persist_task(task)
-            self._tm._persist_events(task)
+            self.tm._persist_task(task)
+            self.tm._persist_events(task)
             _current_task_id.reset(prev_task_id)  # 恢复上下文
 
         result.finished_at = datetime.now()
