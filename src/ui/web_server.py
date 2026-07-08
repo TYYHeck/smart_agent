@@ -242,14 +242,16 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
+  opacity: 0.55;
 }
 .mode-btn:first-child { border-radius: 8px 0 0 8px; }
 .mode-btn:last-child  { border-radius: 0 8px 8px 0; }
-.mode-btn:hover { color: var(--text); }
+.mode-btn:hover { opacity: 0.8; color: var(--text); }
 .mode-btn.active {
   background: var(--primary);
   color: #fff;
   font-weight: 600;
+  opacity: 1;
   box-shadow: 0 1px 4px rgba(88,166,255,.35);
 }
 /* 编排实时面板 */
@@ -2909,6 +2911,13 @@ def init_agent():
                 _db_loop.run_until_complete(_load_history_async())
             except Exception as e:
                 logger.warning(f"历史任务恢复跳过: {e}")
+
+            # 清空 _db_loop 绑定的连接池，后续 uvicorn loop 自行创建连接
+            try:
+                _db_loop.run_until_complete(engine.dispose())
+                logger.info("数据库连接池已重置，等待 uvicorn loop 接管")
+            except Exception as e:
+                logger.warning(f"连接池重置失败: {e}")
         else:
             logger.warning("MySQL 连接失败，使用内存模式")
     else:
