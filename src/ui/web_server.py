@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse, Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 import uvicorn
 
 from src.core.agent import Agent, AgentEvent, create_agent
@@ -2483,6 +2483,10 @@ async def _persist_agent_to_db(name: str, model: str, provider: str, skills: lis
     import logging as _logging
     _log = _logging.getLogger("smart_agent.web")
 
+    if not name or not name.strip():
+        _log.warning(f"Agent 持久化跳过: 名称为空")
+        return
+
     if not _db_initialized:
         _log.warning(f"Agent '{name}' 未持久化: 数据库未初始化 (_db_initialized=False)")
         return
@@ -2530,6 +2534,9 @@ async def _restore_agents(tm):
 
     count = 0
     for cfg in cfgs:
+        if not cfg.name or not cfg.name.strip():
+            _logger.warning(f"跳过空名字 Agent（id={cfg.name!r}），数据库存在脏数据")
+            continue
         if cfg.name in tm._agents:
             continue  # 已存在，跳过
         try:
@@ -2560,6 +2567,19 @@ async def _restore_agents(tm):
     if count > 0:
         _logger.info(f"从数据库恢复了 {count} 个历史 Agent")
 
+    # 清理数据库中空名字的脏数据
+    try:
+        from sqlalchemy import delete
+        async with _session_factory() as session:
+            result = await session.execute(
+                delete(AgentConfigModel).where(AgentConfigModel.name == "")
+            )
+            await session.commit()
+            if result.rowcount:
+                _logger.warning(f"已从数据库删除 {result.rowcount} 条空名字 Agent 记录")
+    except Exception:
+        pass
+
 @app.get("/api/agents/list")
 async def api_list_agents():
     tm = get_task_manager()
@@ -2586,7 +2606,7 @@ async def api_unregister_agent():
 
 
 class CreateAgentRequest(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, description="Agent 名称不能为空")
     model: str = "deepseek-chat"
     provider: str = "deepseek"
     skills: list[str] = []
@@ -2597,6 +2617,9 @@ class CreateAgentRequest(BaseModel):
 async def api_create_agent(req: CreateAgentRequest):
     from src.core.llm import LLMConfig
     from src.tools.builtin_tools import register_all
+
+    if not req.name or not req.name.strip():
+        return JSONResponse({"ok": False, "error": "Agent 名称不能为空"}, status_code=400)
 
     config = LLMConfig(provider=req.provider, model=req.model)
     new_agent = Agent()
@@ -2744,9 +2767,40 @@ async def api_delete_agent(name: str):
     if name not in tm._agents:
         return JSONResponse({"ok": False, "error": "Agent 未找到"}, status_code=404)
 
-    tm.unregister_agent(name)
+    await _do_delete_agent(name, tm)
+    return {"ok": True}
 
-    # 同时从数据库删除，防止重启后恢复
+
+@app.post("/api/agents/cleanup")
+async def api_cleanup_agents():
+    """清理空名字等无效 Agent (内存+数据库)"""
+    tm = get_task_manager()
+    removed = []
+    for agent_name in list(tm._agents.keys()):
+        if not agent_name or not agent_name.strip():
+            await _do_delete_agent(agent_name, tm)
+            removed.append(repr(agent_name))
+    # 同时清理数据库中空名字的残留
+    try:
+        from src.infrastructure.database import _session_factory
+        from src.infrastructure.models import AgentConfigModel
+        from sqlalchemy import delete
+        if _session_factory is not None:
+            async with _session_factory() as session:
+                result = await session.execute(
+                    delete(AgentConfigModel).where(AgentConfigModel.name == "")
+                )
+                await session.commit()
+                if result.rowcount:
+                    removed.append("DB:空name记录")
+    except Exception:
+        pass
+    return {"ok": True, "removed": removed}
+
+
+async def _do_delete_agent(name: str, tm):
+    """删除 Agent（内存+数据库）"""
+    tm.unregister_agent(name)
     try:
         from src.infrastructure.database import _session_factory
         from src.infrastructure.models import AgentConfigModel
@@ -2758,8 +2812,6 @@ async def api_delete_agent(name: str):
                     await session.commit()
     except Exception:
         pass
-
-    return {"ok": True}
 
 
 # ============================================================
