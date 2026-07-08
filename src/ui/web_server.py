@@ -2292,14 +2292,16 @@ def init_agent():
             from src.infrastructure.database import create_engine, get_db_url
             from src.infrastructure.migrations import run_migrations, seed_default_admin
 
-            # config.yaml 的值优先于环境变量
+            # config.yaml 的值优先于环境变量和 DATABASE_URL
             if db_cfg:
                 os.environ["DB_HOST"] = str(db_cfg.get("host", "127.0.0.1"))
                 os.environ["DB_PORT"] = str(db_cfg.get("port", 3306))
                 os.environ["DB_USER"] = str(db_cfg.get("user", "smart_agent"))
                 os.environ["DB_PASSWORD"] = str(db_cfg.get("password", ""))
                 os.environ["DB_NAME"] = str(db_cfg.get("database", "smart_agent"))
-            url = db_url or get_db_url()
+                # 清除可能残留的 DATABASE_URL，强制用 config.yaml 拼出的连接串
+                os.environ.pop("DATABASE_URL", None)
+            url = get_db_url()
 
             import asyncio as _asyncio
             engine = create_engine(url)
