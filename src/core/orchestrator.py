@@ -294,7 +294,16 @@ class Orchestrator:
             elif mode == ExecutionMode.COLLABORATIVE:
                 self._execute_collaborative(task, agents, result, on_progress)
             else:
-                self._execute_single(task, agents[0], result, on_progress)
+                # SINGLE 模式：智能选择最匹配的 Agent
+                idle_tuples = [(a.name, a) for a in agents]
+                best_name, best_proxy = self.tm._smart_assign(task, idle_tuples)
+                if best_proxy is None:
+                    best_proxy = agents[0]
+                self._execute_single(task, best_proxy, result, on_progress)
+                # 更新 result.agents_used 为实际选中的 Agent
+                if best_proxy.name != result.agents_used[0]:
+                    result.agents_used = [best_proxy.name]
+                    task.metadata["orchestration_agents"] = result.agents_used
         except Exception as e:
             logger.error(f"[Orchestrator] 执行失败: {e}")
             result.success = False
