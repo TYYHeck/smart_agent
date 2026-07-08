@@ -2812,6 +2812,12 @@ def init_agent():
     db_cfg = cfg.get("database", {})
     db_url = os.getenv("DATABASE_URL", "")
     _db_initialized = False
+
+    # 创建独立的 event loop，避免 "no current event loop" 问题
+    import asyncio as _db_asyncio
+    _db_loop = _db_asyncio.new_event_loop()
+    _db_asyncio.set_event_loop(_db_loop)
+
     if db_url or db_cfg:
         # config.yaml 的值优先于环境变量和 DATABASE_URL
         if db_cfg:
@@ -2837,8 +2843,7 @@ def init_agent():
         if engine:
             try:
                 # 步骤2: 迁移
-                import asyncio as _asyncio
-                _asyncio.get_event_loop().run_until_complete(run_migrations(engine))
+                _db_loop.run_until_complete(run_migrations(engine))
                 logger.info("数据库迁移完成")
             except Exception as e:
                 logger.warning(f"数据库迁移失败: {e}")
@@ -2847,8 +2852,7 @@ def init_agent():
         if engine:
             try:
                 # 步骤3: 初始化种子数据
-                import asyncio as _asyncio
-                _asyncio.get_event_loop().run_until_complete(seed_default_admin(engine))
+                _db_loop.run_until_complete(seed_default_admin(engine))
                 _db_initialized = True
                 logger.info("MySQL 数据库已连接并完成初始化")
             except Exception as e:
@@ -2858,9 +2862,9 @@ def init_agent():
             # 启用任务持久化
             from src.infrastructure.task_repo import get_task_repo
             get_task_repo().enable_db()
-            # 从数据库恢复历史任务
+            # 从数据库恢复历史任务（使用同一个 loop）
             try:
-                get_task_manager().load_history_from_db()
+                _db_loop.run_until_complete(_load_history_async())
             except Exception as e:
                 logger.warning(f"历史任务恢复跳过: {e}")
         else:
@@ -2917,6 +2921,53 @@ def init_agent():
     logger.info(f"Agent '{_agent.name}' 初始化完成 (模型: {llm_cfg.get('model', 'N/A')})")
 
 
+def _try_parse_dt(val) -> Optional[datetime]:
+    """将 ISO 字符串或 datetime 转为 datetime"""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val
+    try:
+        return datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+async def _load_history_async():
+    """异步加载历史任务（复用数据库 loop）"""
+    from src.infrastructure.task_repo import get_task_repo
+    repo = get_task_repo()
+    if not repo.db_enabled:
+        return
+    tm = get_task_manager()
+    tasks = await repo.list_tasks(status="", limit=100)
+    count = 0
+    with tm._lock:
+        for td in tasks:
+            tid = td.get("id", "")
+            if tm._find_task(tid) is not None:
+                continue
+            from src.core.task_manager import Task, TaskStatus
+            task = Task(
+                id=tid,
+                title=td.get("title", ""),
+                description=td.get("description", ""),
+                status=TaskStatus(td.get("status", "pending")),
+                created_at=_try_parse_dt(td.get("created_at")) or datetime.now(),
+                started_at=_try_parse_dt(td.get("started_at")),
+                finished_at=_try_parse_dt(td.get("finished_at")),
+                assigned_agent=td.get("assigned_agent"),
+                result=td.get("result"),
+                error=td.get("error"),
+                priority=td.get("priority", 0),
+                tags=td.get("tags", []),
+            )
+            tm._history.append(task)
+            count += 1
+    if count > 0:
+        logging.getLogger("smart_agent.web").info(f"从数据库恢复了 {count} 个历史任务")
+
+
 def start(host: str = "127.0.0.1", port: int = 8080):
     """启动 Web 服务"""
     import logging
@@ -2931,11 +2982,10 @@ def start(host: str = "127.0.0.1", port: int = 8080):
     tm.register_agent(proxy)
     tm.start_dispatcher()
 
-    # 从数据库恢复历史 Agent
+    # 从数据库恢复历史 Agent（复用数据库 loop）
     if _db_initialized:
         try:
-            import asyncio as _asyncio_recover
-            _asyncio_recover.get_event_loop().run_until_complete(_restore_agents(tm))
+            _db_loop.run_until_complete(_restore_agents(tm))
         except Exception as e:
             logger.warning(f"Agent 恢复跳过: {e}")
 
