@@ -40,9 +40,15 @@ def get_db_url() -> str:
     port = os.getenv("DB_PORT", "3306")
     user = os.getenv("DB_USER", "smart_agent")
     password = os.getenv("DB_PASSWORD", "smart_agent_pass")
+    # MySQL 驱动限制密码不能超过 72 字节
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) > 72:
+        password = password_bytes[:72].decode("utf-8", errors="ignore")
     database = os.getenv("DB_NAME", "smart_agent")
 
-    return f"mysql+aiomysql://{user}:{password}@{host}:{port}/{database}?charset=utf8mb4"
+    # URL 编码，防止特殊字符导致连接串解析错误
+    from urllib.parse import quote_plus
+    return f"mysql+aiomysql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}?charset=utf8mb4"
 
 
 def create_engine(db_url: str | None = None, echo: bool = False) -> AsyncEngine:

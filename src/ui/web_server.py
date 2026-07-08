@@ -1806,12 +1806,21 @@ async def api_download_file(file: str):
     content_type, _ = _mimetypes.guess_type(real_path)
     fname = _os.path.basename(real_path)
 
+    # RFC 5987: 非 ASCII 文件名必须用 filename*=UTF-8''url_encoded 格式
+    from urllib.parse import quote as _quote
+    try:
+        fname.encode("latin-1")
+        # 纯 ASCII，用标准写法
+        cd_header = f'attachment; filename="{fname}"'
+    except UnicodeEncodeError:
+        # 含中文等非 ASCII，用 RFC 5987 编码
+        cd_header = f"attachment; filename*=UTF-8''{_quote(fname, safe='')}"
+
     return FileResponse(
         path=real_path,
         media_type=content_type or "application/octet-stream",
-        filename=fname,
         headers={
-            "Content-Disposition": f'attachment; filename="{fname}"',
+            "Content-Disposition": cd_header,
         },
     )
 
