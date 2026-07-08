@@ -12,8 +12,13 @@ SmartAgent - 智能 AI Agent 框架
 
 import sys
 import os
+import warnings
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+# 屏蔽第三方库的 DeprecationWarning 刷屏 (anyio/starlette)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="anyio")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="starlette")
 
 if __name__ == "__main__":
     if "--web" in sys.argv:
