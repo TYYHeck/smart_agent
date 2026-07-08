@@ -16,6 +16,7 @@ import json
 import asyncio
 import uuid
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -30,6 +31,9 @@ from src.core.llm import LLMConfig
 from src.core.task_manager import get_task_manager, AgentProxy
 from src.core.orchestrator import ExecutionMode, patch_task_manager
 from src.tools.builtin_tools import register_all
+
+# 编排器线程池（用于 SSE 流式推送）
+_orch_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="orchestrator")
 
 
 # ============================================================
@@ -218,6 +222,61 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .combo-item:hover,.combo-item.active { background:var(--card); color:var(--primary); }
 .combo-item .combo-hint { font-size:11px; color:var(--muted); margin-left:auto; }
 .combo-item .combo-desc { font-size:11px; color:var(--muted); }
+/* 多 Agent 编排面板 */
+.orchestrate-section { background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:16px; overflow:hidden; }
+.orchestrate-header { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; cursor:pointer; user-select:none; transition:background .2s; }
+.orchestrate-header:hover { background:rgba(88,166,255,.05); }
+.orchestrate-body { padding:0 16px 12px; border-top:1px solid var(--border); }
+.orchestrate-body .publish-form { padding-top:12px; }
+.orchestrate-body .publish-form input { background:var(--bg); }
+.orchestrate-body .form-select { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px; color:var(--text); font-size:14px; outline:none; cursor:pointer; }
+.orchestrate-body .form-select:focus { border-color:var(--purple); }
+.orchestrate-body .publish-form button { background:var(--purple); }
+.orchestrate-body .publish-form button:hover { opacity:.85; }
+/* 编排实时面板 */
+.orch-live-container { margin-top:12px; }
+.orch-flow { display:flex; flex-direction:column; gap:8px; }
+.orch-stage-card { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; animation:fadeIn .3s; }
+.orch-stage-card.stage-active { border-color:var(--primary); box-shadow:0 0 8px rgba(88,166,255,.15); }
+.orch-stage-card.stage-done { border-color:var(--success); opacity:.85; }
+.orch-stage-card.stage-error { border-color:var(--error); }
+.orch-stage-card .stage-header { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+.orch-stage-card .stage-icon { font-size:18px; }
+.orch-stage-card .stage-title { font-size:13px; color:var(--text-bright); font-weight:bold; }
+.orch-stage-card .stage-time { font-size:11px; color:var(--muted); margin-left:auto; }
+.orch-stage-card .stage-agent { font-size:12px; color:var(--primary); }
+.orch-stage-card .stage-detail { font-size:12px; color:var(--muted); margin-top:4px; line-height:1.5; }
+.orch-agent-tag { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; background:rgba(163,113,247,.2); color:var(--purple); margin:2px 4px 2px 0; }
+.orch-agent-tag.active { background:rgba(88,166,255,.2); color:var(--primary); animation:pulse 1.5s infinite; }
+.orch-agent-tag.done { background:rgba(63,185,80,.2); color:var(--success); }
+.orch-agent-tag.error { background:rgba(248,81,73,.2); color:var(--error); }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+/* 模式检测卡片 */
+.orch-mode-badge { display:inline-block; padding:4px 12px; border-radius:6px; font-size:13px; font-weight:bold; letter-spacing:1px; }
+.orch-mode-badge.auto { background:rgba(163,113,247,.2); color:var(--purple); }
+.orch-mode-badge.single { background:rgba(88,166,255,.2); color:var(--primary); }
+.orch-mode-badge.parallel { background:rgba(210,153,29,.2); color:var(--warn); }
+.orch-mode-badge.pipeline { background:rgba(57,211,83,.2); color:var(--success); }
+.orch-mode-badge.collaborative { background:rgba(248,81,73,.2); color:var(--error); }
+/* 编排结果展示 */
+.orch-result { margin-top:12px; }
+.orch-result .result-header { font-size:14px; color:var(--text-bright); margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--border); }
+.orch-result .result-item { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:10px; margin-bottom:8px; }
+.orch-result .result-item-title { font-size:12px; color:var(--primary); margin-bottom:4px; font-weight:bold; }
+.orch-result .result-item-text { font-size:12px; color:var(--muted); line-height:1.5; white-space:pre-wrap; max-height:120px; overflow-y:auto; }
+.orch-summary-box { background:var(--bg); border:2px solid var(--purple); border-radius:8px; padding:12px; margin-top:8px; }
+.orch-summary-box .summary-title { font-size:14px; color:var(--purple); font-weight:bold; margin-bottom:8px; }
+.orch-summary-box .summary-text { font-size:13px; color:var(--text); line-height:1.6; white-space:pre-wrap; }
+/* 流程指示器（流水线/并行模式） */
+.orch-flow-indicator { display:flex; align-items:center; gap:6px; padding:8px 0; flex-wrap:wrap; }
+.orch-flow-node { padding:6px 12px; border-radius:16px; font-size:12px; background:var(--card); border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
+.orch-flow-node.active { background:rgba(88,166,255,.15); border-color:var(--primary); color:var(--primary); }
+.orch-flow-node.done { background:rgba(63,185,80,.15); border-color:var(--success); color:var(--success); }
+.orch-flow-arrow { color:var(--border); font-size:12px; }
+/* 输出文件 */
+.orch-output-files { margin-top:8px; }
+.orch-output-files a { color:var(--primary); font-size:12px; text-decoration:none; margin-right:12px; }
+.orch-output-files a:hover { text-decoration:underline; }
 .slash-dropdown { display:none; position:absolute; bottom:100%; left:0; min-width:240px; background:var(--sidebar); border:1px solid var(--border); border-radius:8px; max-height:240px; overflow-y:auto; z-index:200; margin-bottom:4px; box-shadow:0 -2px 12px rgba(0,0,0,.4); }
 .slash-dropdown.show { display:block; }
 .slash-item { padding:10px 14px; cursor:pointer; display:flex; align-items:center; gap:10px; color:var(--text); }
@@ -305,6 +364,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
   <div id="tab-tasks" class="tab-content">
     <div class="task-panel">
       <h2>任务管理</h2>
+      <!-- 单 Agent 发布 -->
       <div class="publish-form">
         <input id="taskInput" placeholder="输入任务描述..." onkeydown="if(event.key==='Enter')publishTask()">
         <div class="combo-wrapper" id="agentComboWrapper" style="min-width:140px;">
@@ -312,6 +372,34 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
           <span class="combo-arrow">▼</span><div class="combo-dropdown" id="agentComboDropdown"></div>
         </div>
         <button onclick="publishTask()">发布任务</button>
+      </div>
+      <!-- 多 Agent 编排执行 -->
+      <div class="orchestrate-section">
+        <div class="orchestrate-header" onclick="toggleOrchestratePanel()">
+          <span>🤖 <b>多 Agent 协作编排</b></span>
+          <span style="font-size:12px;color:var(--muted);">点击展开</span>
+          <span id="orchToggleIcon" style="font-size:12px;">▼</span>
+        </div>
+        <div class="orchestrate-body" id="orchestrateBody" style="display:none;">
+          <div class="publish-form" style="margin-top:0;border-top:none;padding-top:8px;">
+            <input id="orchTaskInput" placeholder="输入复杂任务描述（多步骤、分析、对比等）...">
+            <select id="orchModeSelect" class="form-select" style="min-width:150px;" onchange="onOrchModeChange()">
+              <option value="auto">🤖 自动选择</option>
+              <option value="single">👤 单 Agent</option>
+              <option value="parallel">⚡ 并行执行</option>
+              <option value="pipeline">🔗 流水线</option>
+              <option value="collaborative">🤝 协作讨论</option>
+            </select>
+            <button onclick="executeOrchestrated()" id="orchExecBtn" style="background:var(--purple);">编排执行</button>
+          </div>
+          <div id="orchModeHint" style="font-size:11px;color:var(--muted);padding:0 0 8px 0;border-bottom:1px solid var(--border);">
+            自动分析任务特征，智能选择最优执行策略
+          </div>
+          <!-- 实时协作面板 -->
+          <div id="orchLivePanel" style="display:none;">
+            <div id="orchLiveContent"></div>
+          </div>
+        </div>
       </div>
       <div style="margin-bottom:12px;" id="taskFilterBar">
         <button onclick="filterTasks('', this)" class="btn btn-outline btn-sm task-filter active">全部</button>
@@ -815,6 +903,268 @@ async function showEditTaskModal(taskId) {
 async function cancelTask(taskId) {
   if(!confirm('确认取消任务 '+taskId+'?')) return;
   try { await api('/api/tasks/'+taskId+'/cancel',{method:'POST'}); refreshTasks(''); } catch(e) { console.error(e); }
+}
+
+// ==================== 多 Agent 编排执行 ====================
+let orchAbortController = null;
+let orchIsExecuting = false;
+
+function toggleOrchestratePanel() {
+  const body = $('orchestrateBody');
+  const icon = $('orchToggleIcon');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    icon.textContent = '▲';
+  } else {
+    body.style.display = 'none';
+    icon.textContent = '▼';
+  }
+}
+
+function onOrchModeChange() {
+  const mode = $('orchModeSelect').value;
+  const hints = {
+    auto: '🤖 自动分析任务特征，智能选择最优执行策略',
+    single: '👤 单个 Agent 独立执行 — 适合简单问答、单一操作',
+    parallel: '⚡ 多个 Agent 同时执行，结果汇总 — 适合多角度分析、对比',
+    pipeline: '🔗 Agent 串行接力，前一步输出→后一步输入 — 适合多步骤流程',
+    collaborative: '🤝 Agent 团队讨论互审 — 适合决策、评估、头脑风暴'
+  };
+  $('orchModeHint').textContent = hints[mode] || '';
+}
+
+async function executeOrchestrated() {
+  const input = $('orchTaskInput');
+  const desc = input.value.trim();
+  if (!desc) return;
+  if (orchIsExecuting) return;
+
+  orchIsExecuting = true;
+  const execBtn = $('orchExecBtn');
+  execBtn.disabled = true;
+  execBtn.textContent = '执行中...';
+
+  // 显示实时面板
+  const livePanel = $('orchLivePanel');
+  const liveContent = $('orchLiveContent');
+  livePanel.style.display = 'block';
+  liveContent.innerHTML = `
+    <div class="orch-live-container">
+      <div class="orch-stage-card stage-active">
+        <div class="stage-header">
+          <span class="stage-icon">🚀</span>
+          <span class="stage-title">正在启动编排...</span>
+        </div>
+        <div class="stage-detail">分析任务特征，检测最优执行模式...</div>
+      </div>
+      <div id="orchFlowContainer"></div>
+      <div id="orchResultContainer"></div>
+    </div>`;
+
+  const flowContainer = $('orchFlowContainer');
+  const resultContainer = $('orchResultContainer');
+  const events = [];
+  let finalResult = null;
+  let detectedMode = null;
+
+  orchAbortController = new AbortController();
+
+  try {
+    const mode = $('orchModeSelect').value;
+    const resp = await fetch('/api/tasks/orchestrate/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: desc, title: desc.slice(0, 50), mode: mode, agent_names: [] }),
+      signal: orchAbortController.signal
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const line of decoder.decode(value, { stream: true }).split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          handleOrchEvent(data, flowContainer, resultContainer, events);
+          if (data.stage === 'done') finalResult = data.result;
+          if (data.stage === 'error') finalResult = { error: data.error };
+        } catch (e) {}
+      }
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      flowContainer.innerHTML += `<div class="orch-stage-card stage-error"><div class="stage-header"><span class="stage-icon">❌</span><span class="stage-title">连接失败</span></div><div class="stage-detail">${escHtml(err.message)}</div></div>`;
+    }
+  }
+
+  orchIsExecuting = false;
+  execBtn.disabled = false;
+  execBtn.textContent = '编排执行';
+  orchAbortController = null;
+  input.value = '';
+  refreshTasks('');
+}
+
+function handleOrchEvent(data, flowContainer, resultContainer, events) {
+  const stage = data.stage;
+  const info = data.info || {};
+  events.push(data);
+
+  // 更新启动卡片
+  const firstCard = flowContainer.parentElement.querySelector('.orch-stage-card:first-child');
+  if (firstCard && stage !== 'start' && stage !== 'heartbeat') {
+    firstCard.classList.remove('stage-active');
+    firstCard.classList.add('stage-done');
+    firstCard.querySelector('.stage-icon').textContent = '✅';
+    firstCard.querySelector('.stage-title').textContent = '编排已启动';
+    firstCard.querySelector('.stage-detail').textContent = `模式: ${data.mode || detectedMode || 'auto'} | 参与 Agent: ${(data.agents || []).join(', ') || '自动选择'}`;
+  }
+
+  // 模式检测
+  if (stage === 'mode_detected') {
+    detectedMode = data.mode;
+    if (firstCard) {
+      firstCard.querySelector('.stage-detail').innerHTML = `
+        <span class="orch-mode-badge ${data.mode}">${data.mode.toUpperCase()}</span>
+        <span style="margin-left:8px;font-size:12px;">${escHtml(data.reason || '')}</span>`;
+    }
+    return;
+  }
+
+  if (stage === 'start') {
+    detectedMode = data.mode;
+    return;
+  }
+
+  if (stage === 'heartbeat') return;
+
+  // 各阶段进度渲染
+  if (stage.startsWith('stage_')) {
+    const evtName = stage.replace('stage_', '');
+    appendOrchStageCard(evtName, info, flowContainer);
+  }
+
+  // 最终结果
+  if (stage === 'done') {
+    renderOrchResult(data.result, resultContainer);
+  }
+
+  if (stage === 'error') {
+    flowContainer.innerHTML += `<div class="orch-stage-card stage-error">
+      <div class="stage-header"><span class="stage-icon">❌</span><span class="stage-title">执行失败</span></div>
+      <div class="stage-detail">${escHtml(data.error || '未知错误')}</div></div>`;
+  }
+}
+
+function appendOrchStageCard(evtName, info, container) {
+  const now = new Date().toLocaleTimeString('zh-CN');
+
+  // 各事件卡片配置
+  const templates = {
+    single_start: { icon: '👤', title: '单 Agent 开始执行', detail: `Agent: <b>${info.agent || ''}</b>` },
+    single_done: { icon: '✅', title: '单 Agent 执行完成', detail: `Agent: <b>${info.agent || ''}</b>`, cls: 'stage-done' },
+
+    parallel_start: { icon: '⚡', title: `并行执行 — ${info.agent_count || 0} 个 Agent`, detail: `Agent: ${(info.agents || []).map(a => `<span class="orch-agent-tag active">${a}</span>`).join('')}`, cls: 'stage-active' },
+    agent_start: { icon: '▶️', title: `${info.agent || ''} 开始工作`, detail: `第 ${info.index || 1}/${info.total || 1} 个 Agent` },
+    agent_done: { icon: '✅', title: `${info.agent || ''} 完成`, detail: `第 ${info.index || 1}/${info.total || 1} 个 Agent`, cls: 'stage-done' },
+    agent_error: { icon: '❌', title: `${info.agent || ''} 出错`, detail: escHtml((info.error || '')), cls: 'stage-error' },
+    synthesizing: { icon: '🧩', title: '汇总综合中...', detail: '将多个 Agent 的结果综合为一个答案' },
+    parallel_done: { icon: '🎉', title: `并行执行完成`, detail: `${info.agent_count || 0} 个 Agent 全部完成`, cls: 'stage-done' },
+
+    pipeline_start: { icon: '🔗', title: `流水线启动 — ${info.stages || 0} 个阶段`, detail: `流程: ${(info.agents || []).join(' → ')}` },
+    pipeline_stage: { icon: '▶️', title: `第 ${info.stage || 1} 阶段: ${info.agent || ''}`, detail: `角色: <b>${info.role || ''}</b>` },
+    pipeline_stage_done: { icon: '✅', title: `第 ${info.stage || 1} 阶段完成`, detail: `Agent ${info.agent || ''} 已完成`, cls: 'stage-done' },
+    pipeline_done: { icon: '🎉', title: '流水线执行完成', detail: `${info.stages || 0} 个阶段全部完成`, cls: 'stage-done' },
+
+    collab_start: { icon: '🤝', title: `协作讨论启动 — ${info.members || 0} 人团队`, detail: `成员: ${(info.agents || []).map(a => `<span class="orch-agent-tag">${a}</span>`).join('')}` },
+    collab_round1: { icon: '💬', title: '第 1 轮讨论 — 各自独立分析', detail: '每个 Agent 从自身角度分析问题' },
+    collab_round2: { icon: '🔄', title: '第 2 轮讨论 — 交叉审阅', detail: 'Agent 审阅他人观点，修正完善自身结论' },
+    collab_synthesizing: { icon: '🧩', title: '综合共识中...', detail: '主持人综合团队讨论结果' },
+    collab_done: { icon: '🎉', title: '协作讨论完成', detail: '团队达成共识', cls: 'stage-done' },
+  };
+
+  const tpl = templates[evtName];
+  if (!tpl) return;
+
+  const card = document.createElement('div');
+  card.className = `orch-stage-card ${tpl.cls || ''}`;
+  card.innerHTML = `
+    <div class="stage-header">
+      <span class="stage-icon">${tpl.icon}</span>
+      <span class="stage-title">${tpl.title}</span>
+      <span class="stage-time">${now}</span>
+    </div>
+    <div class="stage-detail">${tpl.detail}</div>`;
+  container.appendChild(card);
+}
+
+function renderOrchResult(result, container) {
+  if (!result || result.error) {
+    container.innerHTML = `<div class="orch-stage-card stage-error"><div class="stage-header"><span class="stage-icon">❌</span><span class="stage-title">执行失败</span></div><div class="stage-detail">${escHtml((result && result.error) || '未知错误')}</div></div>`;
+    return;
+  }
+
+  let agentsHtml = '';
+  if (result.agents_used && result.agents_used.length > 0) {
+    agentsHtml = `<div style="margin-bottom:8px;">参与 Agent: ${result.agents_used.map(a => `<span class="orch-agent-tag done">${escHtml(a)}</span>`).join('')}</div>`;
+  }
+
+  // 各 Agent 子结果
+  let subResults = '';
+  if (result.agent_results && result.agent_results.length > 0) {
+    subResults = result.agent_results.map(r => `
+      <div class="result-item">
+        <div class="result-item-title">${escHtml(r.agent || '')} ${r.role ? '(' + escHtml(r.role) + ')' : ''} ${r.round ? '第' + r.round + '轮' : ''}</div>
+        <div class="result-item-text">${escHtml((r.result || r.summary || '').slice(0, 500))}</div>
+      </div>
+    `).join('');
+  }
+
+  let filesHtml = '';
+  if (result.output_files && result.output_files.length > 0) {
+    filesHtml = `<div class="orch-output-files">📁 输出文件: ${result.output_files.map(f => {
+      const fname = f.split('/').pop() || f.split('\\').pop() || f;
+      return `<a href="/api/files/download?file=${encodeURIComponent(f)}">${escHtml(fname)}</a>`;
+    }).join(' ')}</div>`;
+  }
+
+  const summaryText = escHtml((result.final_result || '').slice(0, 3000));
+
+  container.innerHTML = `
+    <div class="orch-result">
+      <div class="result-header">
+        <span class="orch-mode-badge ${result.mode || 'auto'}">${(result.mode || '').toUpperCase()}</span>
+        <span style="margin-left:8px;font-size:12px;color:var(--muted);">${escHtml(result.mode_reason || '')}</span>
+        <span style="margin-left:8px;font-size:12px;color:var(--muted);">耗时: ${calcDuration(result.started_at, result.finished_at)}</span>
+      </div>
+      ${agentsHtml}
+      ${result.agent_results && result.agent_results.length > 0 ? `
+        <div class="result-header" style="margin-top:8px;font-size:12px;">📋 各 Agent 执行结果</div>
+        ${subResults}
+        <div class="orch-summary-box">
+          <div class="summary-title">📝 最终综合结果</div>
+          <div class="summary-text">${summaryText || '（无汇总文本）'}</div>
+        </div>
+      ` : `
+        <div class="orch-summary-box">
+          <div class="summary-title">📝 执行结果</div>
+          <div class="summary-text">${summaryText || '（无结果）'}</div>
+        </div>
+      `}
+      ${filesHtml}
+    </div>`;
+}
+
+function calcDuration(startStr, endStr) {
+  if (!startStr || !endStr) return '-';
+  try {
+    const ms = new Date(endStr) - new Date(startStr);
+    if (ms < 1000) return ms + 'ms';
+    if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+    return (ms / 60000).toFixed(1) + 'min';
+  } catch (e) { return '-'; }
 }
 
 // ==================== 任务详情弹窗 ====================
@@ -1647,6 +1997,121 @@ async def api_orchestrate_task(req: OrchestrateTaskRequest):
         agent_names=req.agent_names or None,
     )
     return {"ok": result.success, "result": result.to_dict()}
+
+
+# ============================================================
+# 多 Agent 编排 SSE 流式端点（实时推送协作过程）
+# ============================================================
+
+@app.post("/api/tasks/orchestrate/stream")
+async def api_orchestrate_task_stream(request: Request, req: OrchestrateTaskRequest):
+    """
+    编排执行任务 — SSE 实时流式推送多 Agent 协作全过程
+
+    SSE 事件类型:
+      - start         : 编排开始 (包含检测到的模式、参与 Agent)
+      - mode_detected : 自动模式检测结果
+      - stage_*       : 各阶段进度 (agent_start, agent_done, pipeline_stage 等)
+      - agent_think   : Agent 思考/工具调用过程
+      - done          : 编排完成 (含最终结果)
+      - error         : 执行失败
+      - heartbeat     : 心跳保活
+    """
+    tm = get_task_manager()
+
+    if not hasattr(tm, 'execute_orchestrated'):
+        patch_task_manager(tm)
+
+    event_queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_event_loop()
+
+    # ── 注入主事件循环引用，确保跨线程 DB 写入走 run_coroutine_threadsafe ──
+    tm._main_loop = loop
+
+    def on_progress(stage: str, info: dict):
+        """同步回调 → 异步队列 (线程安全桥接)"""
+        try:
+            safe_info = {}
+            for k, v in info.items():
+                if isinstance(v, (str, int, float, bool, list, dict, type(None))):
+                    safe_info[k] = (str(v)[:500] if isinstance(v, str) and len(str(v)) > 500 else v)
+                else:
+                    safe_info[k] = str(v)[:500]
+            asyncio.run_coroutine_threadsafe(
+                event_queue.put({"stage": "stage_" + stage, "info": safe_info}), loop
+            )
+        except Exception:
+            pass
+
+    # 先做模式检测（不需要线程，直接同步检测）
+    if req.mode == "auto" and hasattr(tm, 'detect_best_mode'):
+        detection = tm.detect_best_mode(req.description)
+        detected_mode = detection.get("mode", "single")
+        detected_reason = detection.get("reason", "")
+    else:
+        detected_mode = req.mode
+        detected_reason = "手动指定"
+
+    # 解析参与 Agent 列表
+    agents_list = tm.list_agents()
+    available_agents = [a["name"] for a in agents_list]
+    if req.agent_names:
+        selected_agents = [n for n in req.agent_names if n in available_agents]
+    else:
+        selected_agents = [a["name"] for a in agents_list if a.get("status") == "idle"]
+        if not selected_agents:
+            selected_agents = available_agents
+
+    def run_orchestrator():
+        """在后台线程执行编排"""
+        try:
+            result = tm.execute_orchestrated(
+                description=req.description,
+                title=req.title,
+                mode=detected_mode,
+                agent_names=req.agent_names or None,
+                on_progress=on_progress,
+            )
+            asyncio.run_coroutine_threadsafe(
+                event_queue.put({"stage": "done", "result": result.to_dict()}), loop
+            )
+        except Exception as e:
+            import traceback
+            asyncio.run_coroutine_threadsafe(
+                event_queue.put({
+                    "stage": "error",
+                    "error": str(e),
+                    "traceback": traceback.format_exc()[:500],
+                }), loop
+            )
+
+    # 启动后台执行
+    loop.run_in_executor(_orch_executor, run_orchestrator)
+
+    async def generate():
+        # 初始事件：模式检测结果 + Agent 列表
+        yield f"data: {json.dumps({'stage': 'start', 'mode': detected_mode, 'mode_reason': detected_reason, 'agents': selected_agents, 'available_agents': available_agents, 'description': req.description[:200]}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'stage': 'mode_detected', 'mode': detected_mode, 'reason': detected_reason}, ensure_ascii=False)}\n\n"
+
+        while True:
+            try:
+                event = await asyncio.wait_for(event_queue.get(), timeout=2.0)
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get("stage") in ("done", "error"):
+                    break
+            except asyncio.TimeoutError:
+                if await request.is_disconnected():
+                    break
+                yield f"data: {json.dumps({'stage': 'heartbeat'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/tasks/detect-mode")

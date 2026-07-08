@@ -142,6 +142,7 @@ class TaskManager:
         self._dispatch_interval = 1.0         # 调度间隔（秒）
         self._repo = None                     # 懒加载 TaskRepository
         self._db_enabled = False
+        self._main_loop: Optional[_asyncio.AbstractEventLoop] = None  # 主事件循环引用（跨线程 DB 写入用）
 
     # ======== 数据库持久化 ========
 
@@ -165,7 +166,12 @@ class TaskManager:
             loop = _asyncio.get_running_loop()
             loop.create_task(coro)
         except RuntimeError:
-            _db_executor.submit(self._run_in_thread, coro)
+            # 不在 asyncio 线程中 → 投回主事件循环（避免 SQLAlchemy async 跨循环错误）
+            main_loop = self._main_loop
+            if main_loop is not None and main_loop.is_running():
+                _asyncio.run_coroutine_threadsafe(coro, main_loop)
+            else:
+                _db_executor.submit(self._run_in_thread, coro)
 
     @staticmethod
     def _run_in_thread(coro):
