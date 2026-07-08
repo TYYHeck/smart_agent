@@ -264,6 +264,10 @@ class Orchestrator:
         # 更新元数据中的实际 Agent 列表
         task.metadata["orchestration_agents"] = result.agents_used
 
+        # 初始化所有子 Agent 状态为 pending
+        init_statuses = {name: "pending" for name in result.agents_used}
+        task.metadata["orchestration_agent_statuses"] = init_statuses
+
         # 注册到 TaskManager 历史（让前端任务列表/详情可查看）
         task.status = TaskStatus.RUNNING
         task.started_at = datetime.now()
@@ -312,6 +316,39 @@ class Orchestrator:
         result.finished_at = datetime.now()
         return result
 
+    # ======== 辅助：注入 event_logger 到 Agent ────
+
+    @staticmethod
+    def _run_agent_with_logging(agent_proxy: AgentProxy, task: Task, prompt: str) -> str:
+        """运行 Agent 并自动捕获事件到 task.event_log"""
+        original_on_event = getattr(agent_proxy.agent, 'on_event', None)
+
+        def event_logger(event, data):
+            evt_name = event.value if hasattr(event, 'value') else str(event)
+            task.add_event(evt_name, str(data)[:300])
+            if original_on_event:
+                try:
+                    original_on_event(event, data)
+                except Exception:
+                    pass
+
+        try:
+            agent_proxy.agent.on_event = event_logger
+            output = agent_proxy.agent.run(prompt)
+            agent_proxy.agent.on_event = original_on_event
+            return output or ""
+        except Exception:
+            agent_proxy.agent.on_event = original_on_event
+            raise
+
+    @staticmethod
+    def _update_agent_status(task: Task, agent_name: str, status: str):
+        """更新 task.metadata 中的子 Agent 状态"""
+        statuses = task.metadata.get("orchestration_agent_statuses", {})
+        if isinstance(statuses, dict):
+            statuses[agent_name] = status
+            task.metadata["orchestration_agent_statuses"] = statuses
+
     # ======== 单 Agent 执行 ========
 
     def _execute_single(
@@ -326,19 +363,22 @@ class Orchestrator:
             "agent": agent_proxy.name,
             "task": task.description[:100],
         })
+        self._update_agent_status(task, agent_proxy.name, "running")
 
         try:
-            output = agent_proxy.agent.run(task.description)
+            output = self._run_agent_with_logging(agent_proxy, task, task.description)
             result.final_result = output or ""
             result.agent_results.append({
                 "agent": agent_proxy.name,
                 "role": "executor",
                 "result": output,
             })
+            self._update_agent_status(task, agent_proxy.name, "done")
             self._emit_progress(on_progress, "single_done", {
                 "agent": agent_proxy.name,
             })
         except Exception as e:
+            self._update_agent_status(task, agent_proxy.name, "failed")
             result.success = False
             result.error = str(e)
             result.final_result = f"[{agent_proxy.name}] 执行失败: {e}"
@@ -371,20 +411,23 @@ class Orchestrator:
 
         def _run_agent(idx: int, proxy: AgentProxy):
             try:
+                self._update_agent_status(task, proxy.name, "running")
                 self._emit_progress(on_progress, "agent_start", {
                     "agent": proxy.name, "index": idx + 1, "total": n,
                 })
-                output = proxy.agent.run(task.description)
+                output = self._run_agent_with_logging(proxy, task, task.description)
                 with lock:
                     partial_results.append({
                         "agent": proxy.name,
                         "index": idx,
                         "result": output or "",
                     })
+                self._update_agent_status(task, proxy.name, "done")
                 self._emit_progress(on_progress, "agent_done", {
                     "agent": proxy.name, "index": idx + 1, "total": n,
                 })
             except Exception as e:
+                self._update_agent_status(task, proxy.name, "failed")
                 with lock:
                     partial_results.append({
                         "agent": proxy.name,
@@ -417,7 +460,7 @@ class Orchestrator:
         )
 
         try:
-            summary = synthesizer.agent.run(synthesis_prompt)
+            summary = self._run_agent_with_logging(synthesizer, task, synthesis_prompt)
             result.final_result = summary or ""
         except Exception as e:
             # 汇总失败，手动拼接
@@ -483,6 +526,7 @@ class Orchestrator:
                 "stage": i + 1, "total": n,
                 "agent": agent.name, "role": role,
             })
+            self._update_agent_status(task, agent.name, "running")
 
             # 构建流水线 prompt
             if i == 0:
@@ -498,7 +542,7 @@ class Orchestrator:
                 )
 
             try:
-                output = agent.agent.run(prompt)
+                output = self._run_agent_with_logging(agent, task, prompt)
                 stage_results.append({
                     "agent": agent.name,
                     "role": role,
@@ -506,11 +550,13 @@ class Orchestrator:
                     "result": output or "",
                 })
                 current_input = output or ""
+                self._update_agent_status(task, agent.name, "done")
                 self._emit_progress(on_progress, "pipeline_stage_done", {
                     "stage": i + 1, "total": n,
                     "agent": agent.name,
                 })
             except Exception as e:
+                self._update_agent_status(task, agent.name, "failed")
                 stage_results.append({
                     "agent": agent.name,
                     "role": role,
@@ -569,6 +615,7 @@ class Orchestrator:
         initial_opinions: list[dict] = []
 
         for agent in agents:
+            self._update_agent_status(task, agent.name, "running")
             prompt = (
                 f"团队正在讨论以下问题，你是团队成员「{agent.name}」。\n\n"
                 f"问题: {task.description}\n\n"
@@ -577,13 +624,15 @@ class Orchestrator:
                 f"用中文回答。"
             )
             try:
-                opinion = agent.agent.run(prompt)
+                opinion = self._run_agent_with_logging(agent, task, prompt)
                 initial_opinions.append({
                     "agent": agent.name,
                     "opinion": opinion or "",
                     "round": 1,
                 })
+                self._update_agent_status(task, agent.name, "done")
             except Exception as e:
+                self._update_agent_status(task, agent.name, "failed")
                 initial_opinions.append({
                     "agent": agent.name,
                     "opinion": f"[错误] {e}",
@@ -613,7 +662,7 @@ class Orchestrator:
                 f"如果不同意，请说明理由。用中文回答。"
             )
             try:
-                revised = agent.agent.run(prompt)
+                revised = self._run_agent_with_logging(agent, task, prompt)
                 revised_opinions.append({
                     "agent": agent.name,
                     "opinion": revised or "",
@@ -635,7 +684,7 @@ class Orchestrator:
         )
 
         try:
-            final = agents[0].agent.run(synthesis_prompt)
+            final = self._run_agent_with_logging(agents[0], task, synthesis_prompt)
             result.final_result = final or ""
         except Exception as e:
             result.final_result = "团队讨论因技术原因中断，各成员观点如下:\n\n" + "\n\n---\n\n".join([

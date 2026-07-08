@@ -245,6 +245,10 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .orch-agent-tag.active { background:rgba(88,166,255,.2); color:var(--primary); animation:pulse 1.5s infinite; }
 .orch-agent-tag.done { background:rgba(63,185,80,.2); color:var(--success); }
 .orch-agent-tag.error { background:rgba(248,81,73,.2); color:var(--error); }
+.orch-agent-tag.agent-done { background:rgba(63,185,80,.2); color:var(--success); }
+.orch-agent-tag.agent-running { background:rgba(88,166,255,.2); color:var(--primary); animation:pulse 1.5s infinite; }
+.orch-agent-tag.agent-failed { background:rgba(248,81,73,.2); color:var(--error); }
+.orch-agent-tag.agent-pending { background:rgba(139,148,158,.15); color:var(--muted); }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
 /* 模式徽章 */
 .orch-mode-badge { display:inline-block; padding:4px 12px; border-radius:6px; font-size:13px; font-weight:bold; letter-spacing:1px; }
@@ -253,6 +257,15 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .orch-mode-badge.parallel { background:rgba(210,153,29,.2); color:var(--warn); }
 .orch-mode-badge.pipeline { background:rgba(57,211,83,.2); color:var(--success); }
 .orch-mode-badge.collaborative { background:rgba(248,81,73,.2); color:var(--error); }
+/* Agent 状态网格（任务详情弹窗内） */
+.agent-status-grid { display:flex; flex-direction:column; gap:6px; }
+.agent-status-row { display:flex; align-items:center; gap:8px; padding:4px 0; }
+.agent-status-name { font-size:13px; color:var(--text); min-width:80px; }
+.agent-status-state { font-size:11px; padding:1px 8px; border-radius:10px; }
+.agent-status-state.agent-done { color:var(--success); background:rgba(63,185,80,.15); }
+.agent-status-state.agent-running { color:var(--primary); background:rgba(88,166,255,.15); }
+.agent-status-state.agent-failed { color:var(--error); background:rgba(248,81,73,.15); }
+.agent-status-state.agent-pending { color:var(--muted); background:rgba(139,148,158,.1); }
 /* 编排结果展示 */
 .orch-result { margin-top:12px; }
 .orch-result .result-header { font-size:14px; color:var(--text-bright); margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--border); }
@@ -866,6 +879,7 @@ async function refreshTasks(status) {
     const data = await api(url);
     const list = $('taskList');
     if(!data.tasks||data.tasks.length===0) { list.innerHTML='<div style="color:var(--muted);padding:20px;">暂无任务</div>'; return; }
+    const statusMap = {pending:'待处理',running:'执行中',completed:'已完成',failed:'失败',cancelled:'已取消'};
     list.innerHTML = data.tasks.map(t => {
       // 编排任务标记
       const meta = t.metadata_ || {};
@@ -874,14 +888,30 @@ async function refreshTasks(status) {
         ? `<span class="orch-mode-badge ${isOrch}" style="font-size:10px;padding:1px 6px;margin-left:6px;">${isOrch.toUpperCase()}</span>`
         : '';
 
+      // 编排子Agent状态（显示在卡片内）
+      let orchSubStatus = '';
+      if (isOrch && meta.orchestration_agents) {
+        const agentStatuses = meta.orchestration_agent_statuses || {};
+        orchSubStatus = `<div class="task-card-orch">
+          <span style="font-size:10px;color:var(--muted);">参与:</span>
+          ${meta.orchestration_agents.map(a => {
+            const st = agentStatuses[a];
+            const stIcon = st==='done'?'✅':st==='running'?'🔄':st==='failed'?'❌':'⏳';
+            const stCls = st==='done'?'agent-done':st==='running'?'agent-running':st==='failed'?'agent-failed':'agent-pending';
+            return `<span class="orch-agent-tag ${stCls}" title="${a}: ${st||'等待中'}">${stIcon} ${escHtml(a)}</span>`;
+          }).join(' ')}
+        </div>`;
+      }
+
       return `
       <div class="task-card">
         <div class="task-info" style="cursor:pointer;" onclick="showTaskDetailModal('${t.id}')">
           <div class="task-title">${escHtml(t.title||t.description||'').slice(0,60)}${orchBadge}</div>
           <div class="task-meta">ID: ${t.id} | ${(t.created_at||'').slice(0,16)} | Agent: ${t.assigned_agent||'-'}${isOrch ? ' | 多Agent协作' : ''}</div>
+          ${orchSubStatus}
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <span class="status-badge ${t.status}">${t.status}</span>
+          <span class="status-badge ${t.status}">${statusMap[t.status]||t.status}</span>
           <button class="btn btn-outline btn-sm" onclick="showTaskDetailModal('${t.id}')">详情</button>
           ${t.status==='pending'?`<button class="btn btn-outline btn-sm" onclick="showEditTaskModal('${t.id}')">编辑</button>`:''}
           ${t.status==='pending'||t.status==='running'?`<button class="btn btn-danger btn-sm" onclick="cancelTask('${t.id}')">取消</button>`:''}
@@ -1170,15 +1200,41 @@ async function showTaskDetailModal(taskId) {
     // 编排信息
     const meta = t.metadata_ || {};
     const isOrch = meta.orchestration_mode;
+
+    // 编排子Agent状态详情
+    let orchAgentStatusHtml = '';
+    if (isOrch && meta.orchestration_agents && meta.orchestration_agents.length > 0) {
+      const agentStatuses = meta.orchestration_agent_statuses || {};
+      const statusLabel = {done:'已完成',running:'执行中',failed:'失败',pending:'等待中'};
+      orchAgentStatusHtml = `
+        <div class="detail-section">
+          <div class="detail-label">子Agent 执行状态</div>
+          <div class="detail-value">
+            <div class="agent-status-grid">
+              ${meta.orchestration_agents.map(a => {
+                const st = agentStatuses[a] || 'pending';
+                const stIcon = st==='done'?'✅':st==='running'?'🔄':st==='failed'?'❌':'⏳';
+                const stCls = st==='done'?'agent-done':st==='running'?'agent-running':st==='failed'?'agent-failed':'agent-pending';
+                return `<div class="agent-status-row">
+                  <span class="orch-agent-tag ${stCls}">${stIcon}</span>
+                  <span class="agent-status-name">${escHtml(a)}</span>
+                  <span class="agent-status-state ${stCls}">${statusLabel[st]||st}</span>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>`;
+    }
+
     const orchInfo = isOrch ? `
         <div class="detail-section">
           <div class="detail-label">编排模式</div>
           <div class="detail-value">
             <span class="orch-mode-badge ${isOrch}">${isOrch.toUpperCase()}</span>
             ${meta.orchestration_reason ? `<span style="margin-left:8px;font-size:12px;color:var(--muted);">${escHtml(meta.orchestration_reason)}</span>` : ''}
-            ${meta.orchestration_agents ? `<div style="margin-top:4px;font-size:12px;color:var(--muted);">参与Agent: ${meta.orchestration_agents.map(a => `<span class="orch-agent-tag done">${escHtml(a)}</span>`).join(' ')}</div>` : ''}
           </div>
-        </div>` : '';
+        </div>
+        ${orchAgentStatusHtml}` : '';
 
     // 事件日志渲染
     const eventsHtml = (t.event_log||[]).length>0
