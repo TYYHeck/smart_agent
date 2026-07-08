@@ -237,12 +237,14 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
   font-size: 13px;
   background: transparent;
   border: none;
-  border-radius: 8px;
+  border-radius: 0;
   color: var(--muted);
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
 }
+.mode-btn:first-child { border-radius: 8px 0 0 8px; }
+.mode-btn:last-child  { border-radius: 0 8px 8px 0; }
 .mode-btn:hover { color: var(--text); }
 .mode-btn.active {
   background: var(--primary);
