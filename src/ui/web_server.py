@@ -20,7 +20,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from fastapi import FastAPI, Request, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse, Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 import uvicorn
@@ -144,6 +144,14 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .event-time { color:var(--muted); margin-right:8px; font-family:monospace; font-size:11px; }
 .event-name { color:var(--text-bright); font-weight:500; }
 .event-data { color:var(--muted); font-size:11px; margin-top:2px; margin-left:38px; word-break:break-all; }
+.output-files-list { max-height:240px; overflow-y:auto; }
+.output-file-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid rgba(48,54,61,.4); flex-wrap:wrap; }
+.output-file-row:last-child { border-bottom:none; }
+.output-file-row .file-icon { font-size:14px; flex-shrink:0; }
+.output-file-row .file-name { color:var(--text-bright); font-weight:500; font-size:12px; flex-shrink:0; }
+.output-file-row .file-path-muted { color:var(--muted); font-size:10px; font-family:monospace; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.output-file-row .btn-sm { padding:2px 10px; font-size:11px; }
+.code-block { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; padding:12px 16px; overflow:auto; font-size:12px; line-height:1.6; white-space:pre; margin:0; }
 .form-group { margin-bottom:12px; }
 .form-group label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
 .form-input, .form-textarea, .form-select { width:100%; background:var(--card); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); font-size:13px; outline:none; font-family:inherit; }
@@ -262,6 +270,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
     <button class="tab-btn" onclick="switchTab('chat')"><span class="tab-icon">💬</span>对话</button>
     <button class="tab-btn" onclick="switchTab('tasks')"><span class="tab-icon">📋</span>任务管理</button>
     <button class="tab-btn" onclick="switchTab('agents')"><span class="tab-icon">🤖</span>Agent管理</button>
+    <button class="tab-btn" onclick="switchTab('files')"><span class="tab-icon">📁</span>输出文件</button>
     <button class="tab-btn" onclick="switchTab('config')"><span class="tab-icon">⚙️</span>配置</button>
   </div>
 
@@ -333,6 +342,22 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
       <div id="configSections"></div>
     </div>
   </div>
+
+  <!-- ===== 输出文件 ===== -->
+  <div id="tab-files" class="tab-content">
+    <div class="task-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h2 style="margin:0;">📁 输出文件</h2>
+        <button class="btn btn-outline btn-sm" onclick="loadOutputFiles()">🔄 刷新</button>
+      </div>
+      <p style="color:var(--muted);margin-bottom:12px;font-size:12px;">
+        Agent 执行任务时生成的文件列表。点击下载或预览。
+      </p>
+      <div id="outputFilesList" style="margin-bottom:12px;">
+        <div style="color:var(--muted);padding:12px 0;">加载中...</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 通用模态框 -->
@@ -347,6 +372,50 @@ const api = (url, opts) => fetch(url, opts).then(r => r.json());
 
 function formatTime(ts) { if(!ts) return '-'; const d=new Date(ts); return d.toLocaleString('zh-CN'); }
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+// ==================== 文件下载 / 预览 ====================
+function downloadFile(filepath) {
+  const url = '/api/files/download?file=' + encodeURIComponent(filepath);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function previewFile(filepath) {
+  try {
+    const url = '/api/files/preview?file=' + encodeURIComponent(filepath);
+    const data = await api(url);
+    if(!data.ok) return alert(data.detail || '预览失败');
+    const fname = filepath.split('/').pop() || filepath.split('\\').pop() || filepath;
+    const langClass = getCodeLang(filepath);
+    openModal('📄 预览: ' + escHtml(fname),
+      `<div style="max-height:70vh;overflow:auto;">
+        <pre class="code-block ${langClass}"><code>${escHtml(data.content)}</code></pre>
+        <p style="margin-top:8px;color:var(--muted);font-size:12px;">
+          文件: ${escHtml(filepath)} &nbsp;|&nbsp; ${data.size||0} 字符
+          <a href="/api/files/download?file=${encodeURIComponent(filepath)}" class="btn btn-sm btn-outline" style="margin-left:8px;">⬇ 下载</a>
+        </p>
+      </div>`, null, null);
+    const saveBtn = $('modalSaveBtn');
+    if(saveBtn) saveBtn.style.display = 'none';
+    $('modalContent').classList.add('wide');
+  } catch(e) { console.error(e); alert('预览失败: ' + e.message); }
+}
+
+function getCodeLang(filepath) {
+  const ext = (filepath||'').toLowerCase().split('.').pop();
+  const map = {py:'language-python',js:'language-javascript',ts:'language-typescript',
+               html:'language-html',css:'language-css',json:'language-json',md:'language-markdown',
+               sql:'language-sql',yaml:'language-yaml',yml:'language-yaml',sh:'language-bash',
+               bash:'language-bash',xml:'language-xml',java:'language-java',go:'language-go',
+               rs:'language-rust',cpp:'language-cpp',c:'language-c',rb:'language-ruby',
+               php:'language-php',swift:'language-swift',kt:'language-kotlin'};
+  return map[ext] || '';
+}
 
 // ==================== 模态框 ====================
 function openModal(title, bodyHtml, onSave, saveLabel) {
@@ -376,6 +445,7 @@ function switchTab(tab) {
   if(tab === 'dashboard') loadDashboard();
   else if(tab === 'tasks') { refreshTasks(''); refreshAgentCombo(); }
   else if(tab === 'agents') loadAgents();
+  else if(tab === 'files') loadOutputFiles();
   else if(tab === 'config') loadConfig();
 }
 
@@ -818,6 +888,26 @@ async function showTaskDetailModal(taskId) {
           <div class="detail-label">错误信息</div>
           <div class="detail-value error-box">${escHtml(t.error)}</div>
         </div>` : ''}
+        ${(t.output_files && t.output_files.length > 0) ? `
+        <div class="detail-section">
+          <div class="detail-label">📁 输出文件 (${t.output_files.length})</div>
+          <div class="output-files-list">
+            ${t.output_files.map(f => {
+              const fname = f.split('/').pop() || f.split('\\').pop() || f;
+              const ext = (fname.split('.').pop()||'').toLowerCase();
+              const icon = {'py':'🐍','js':'🟨','ts':'🔷','html':'🌐','css':'🎨','json':'📋',
+                           'md':'📝','txt':'📄','csv':'📊','yaml':'⚙️','yml':'⚙️',
+                           'toml':'⚙️','png':'🖼️','jpg':'🖼️','svg':'🖼️','pdf':'📕'}[ext] || '📎';
+              return `<div class="output-file-row">
+                <span class="file-icon">${icon}</span>
+                <span class="file-name" title="${escHtml(f)}">${escHtml(fname)}</span>
+                <span class="file-path-muted" title="${escHtml(f)}">${escHtml(f)}</span>
+                <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();downloadFile('${escAttr(f)}')">⬇ 下载</button>
+                <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();previewFile('${escAttr(f)}')">👁 预览</button>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>` : ''}
         <div class="detail-section">
           <div class="detail-label">执行日志 (最近20条)</div>
           <div class="event-log">${eventsHtml}</div>
@@ -902,6 +992,35 @@ function showEditAgentModal(name) {
 async function deleteAgent(name) {
   if(!confirm('确定删除 Agent: '+name+'?')) return;
   try { await api('/api/agents/'+encodeURIComponent(name),{method:'DELETE'}); loadAgents(); refreshAgentCombo(); } catch(e) { console.error(e); }
+}
+
+// ==================== 输出文件浏览 ====================
+async function loadOutputFiles() {
+  try {
+    const data = await api('/api/files/list');
+    if(!data.ok) { $('outputFilesList').innerHTML = '<div style="color:var(--muted);">加载失败</div>'; return; }
+    const files = data.files || [];
+    if(files.length===0) {
+      $('outputFilesList').innerHTML = '<div style="color:var(--muted);padding:24px 0;text-align:center;">暂无输出文件。<br>发布任务让 Agent 生成文件后会自动显示在这里。</div>';
+      return;
+    }
+    let html = '<table class="data-table"><tr><th>文件名</th><th>路径</th><th>大小</th><th>操作</th></tr>';
+    files.forEach(f => {
+      const ext = (f.name.split('.').pop()||'').toLowerCase();
+      const icon = {'py':'🐍','js':'🟨','html':'🌐','css':'🎨','json':'📋','md':'📝','txt':'📄','csv':'📊','yaml':'⚙️','yml':'⚙️','png':'🖼️','jpg':'🖼️'}[ext] || '📎';
+      html += `<tr>
+        <td><span style="margin-right:4px;">${icon}</span>${escHtml(f.name)}</td>
+        <td style="font-size:11px;color:var(--muted);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(f.path)}">${escHtml(f.path)}</td>
+        <td>${escHtml(f.size_str)}</td>
+        <td>
+          <button class="btn btn-sm btn-outline" onclick="downloadFile('${escAttr(f.path)}')">⬇ 下载</button>
+          <button class="btn btn-sm btn-outline" onclick="previewFile('${escAttr(f.path)}')">👁 预览</button>
+        </td>
+      </tr>`;
+    });
+    html += '</table>';
+    $('outputFilesList').innerHTML = html;
+  } catch(e) { console.error(e); }
 }
 
 // ==================== 配置编辑 ====================
@@ -1572,6 +1691,168 @@ async def api_list_modes():
             for m in ExecutionMode
         ],
     }
+
+
+# ============================================================
+# 文件输出 API — 任务生成的文件可见且可下载
+# ============================================================
+
+import os as _os
+import mimetypes as _mimetypes
+from pathlib import Path as _Path
+
+
+def _get_output_dir() -> str:
+    """获取配置的输出目录绝对路径"""
+    from src.core.config import get_config, load_config
+    try:
+        cfg = get_config()
+    except RuntimeError:
+        cfg = load_config()
+    return _os.path.abspath(cfg.tools.output_dir)
+
+
+def _safe_file_path(filepath: str) -> str | None:
+    """
+    安全检查：确保文件路径在 output_dir 内。
+    返回绝对路径，不安全则返回 None。
+    """
+    output_dir = _get_output_dir()
+    abs_path = _os.path.abspath(
+        filepath if _os.path.isabs(filepath)
+        else _os.path.join(output_dir, filepath)
+    )
+    # 规范化路径防止目录穿越
+    real_path = _os.path.realpath(abs_path)
+    real_output = _os.path.realpath(output_dir)
+    if not real_path.startswith(real_output + _os.sep) and real_path != real_output:
+        return None
+    return real_path
+
+
+def _list_output_files(task_id: str = "") -> list[dict]:
+    """扫描输出目录，返回文件列表。可过滤特定任务文件。"""
+    output_dir = _get_output_dir()
+    files = []
+    if not _os.path.isdir(output_dir):
+        return files
+
+    known_files: set[str] = set()
+    if task_id:
+        tm = get_task_manager()
+        task = tm.get_task(task_id)
+        if task:
+            known_files = set(task.output_files)
+
+    for root, dirs, filenames in _os.walk(output_dir):
+        for fname in filenames:
+            abs_path = _os.path.join(root, fname)
+            rel_path = _os.path.relpath(abs_path, output_dir).replace("\\", "/")
+
+            # 如果指定了 task_id，只保留该任务的输出文件
+            if task_id and abs_path not in known_files:
+                continue
+
+            try:
+                size = _os.path.getsize(abs_path)
+            except OSError:
+                size = 0
+
+            files.append({
+                "name": fname,
+                "path": rel_path,
+                "size": size,
+                "size_str": _format_file_size(size),
+            })
+
+    # 按文件名排序
+    files.sort(key=lambda f: f["name"])
+    return files
+
+
+def _format_file_size(size: int) -> str:
+    """格式化文件大小"""
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+@app.get("/api/files/list")
+async def api_list_files(task_id: str = ""):
+    """
+    列出输出文件
+    - task_id=xxx: 只列出该任务生成的文件
+    - 不传: 列出所有输出文件
+    """
+    files = _list_output_files(task_id)
+    return {"ok": True, "files": files, "task_id": task_id or None}
+
+
+@app.get("/api/files/download")
+async def api_download_file(file: str):
+    """
+    下载指定的输出文件
+    - file: 文件路径（相对于 output_dir，或绝对路径）
+    """
+    real_path = _safe_file_path(file)
+    if not real_path:
+        raise HTTPException(status_code=404, detail="文件不存在或路径非法")
+    if not _os.path.isfile(real_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    # 检测 MIME 类型，下载模式
+    content_type, _ = _mimetypes.guess_type(real_path)
+    fname = _os.path.basename(real_path)
+
+    return FileResponse(
+        path=real_path,
+        media_type=content_type or "application/octet-stream",
+        filename=fname,
+        headers={
+            "Content-Disposition": f'attachment; filename="{fname}"',
+        },
+    )
+
+
+@app.get("/api/files/preview")
+async def api_preview_file(file: str):
+    """
+    预览文本文件（返回内容，用于前端嵌入显示）
+    """
+    real_path = _safe_file_path(file)
+    if not real_path:
+        raise HTTPException(status_code=404, detail="文件不存在或路径非法")
+    if not _os.path.isfile(real_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    # 只允许预览文本类文件
+    content_type, _ = _mimetypes.guess_type(real_path)
+    text_types = {"text/", "application/json", "application/xml", "application/javascript"}
+    is_text = (content_type and any(
+        content_type.startswith(t) for t in text_types
+    )) or real_path.endswith((".py", ".md", ".yaml", ".yml", ".toml", ".ini", ".cfg"))
+
+    if not is_text:
+        raise HTTPException(status_code=400, detail="此文件类型不支持在线预览，请下载查看")
+
+    try:
+        with open(real_path, encoding="utf-8") as f:
+            content = f.read()
+        if len(content) > 50000:
+            content = content[:50000] + "\n\n... (文件过长，已截断到 50000 字符)"
+        return {
+            "ok": True,
+            "content": content,
+            "file": file,
+            "size": len(content),
+            "content_type": content_type or "text/plain",
+        }
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="二进制文件不支持预览")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/tasks/list")

@@ -143,6 +143,17 @@ def write_file(filepath: str, content: str) -> str:
         os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(content)
+
+        # ── 自动关联到当前任务 ──
+        try:
+            from ..core.task_manager import _current_task_id, get_task_manager
+            task_id = _current_task_id.get()
+            if task_id:
+                tm = get_task_manager()
+                tm.record_output_file(task_id, abs_path)
+        except Exception:
+            pass  # 静默失败，不影响主流程
+
         return f"? 文件已写入: {abs_path} ({len(content)} 字符)"
     except Exception as e:
         return f"写入失败: {str(e)}"

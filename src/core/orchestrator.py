@@ -25,7 +25,7 @@ from datetime import datetime
 import threading
 import logging
 
-from .task_manager import TaskManager, Task, AgentProxy, TaskStatus
+from .task_manager import TaskManager, Task, AgentProxy, TaskStatus, _current_task_id
 
 logger = logging.getLogger("smart_agent.orchestrator")
 
@@ -55,6 +55,7 @@ class OrchestrationResult:
     agents_used: list[str] = field(default_factory=list)
     final_result: str = ""               # 最终汇总结果
     agent_results: list[dict] = field(default_factory=list)  # 每个 Agent 的子结果
+    output_files: list[str] = field(default_factory=list)    # 输出文件列表
     success: bool = True
     error: str = ""
     started_at: Optional[datetime] = None
@@ -71,6 +72,7 @@ class OrchestrationResult:
                 {"agent": r["agent"], "summary": (r.get("result", "") or "")[:500]}
                 for r in self.agent_results
             ],
+            "output_files": self.output_files,
             "success": self.success,
             "error": self.error,
             "started_at": self.started_at.isoformat() if self.started_at else None,
@@ -261,6 +263,9 @@ class Orchestrator:
             f"Agent={result.agents_used}"
         )
 
+        # ── 设置当前任务上下文（用于 write_file 自动关联文件）──
+        prev_task_id = _current_task_id.set(task.id)
+
         # 分发
         try:
             if mode == ExecutionMode.PARALLEL:
@@ -275,6 +280,11 @@ class Orchestrator:
             logger.error(f"[Orchestrator] 执行失败: {e}")
             result.success = False
             result.error = str(e)
+        else:
+            # 收集输出文件（write_file 通过 _current_task_id 自动关联了 task）
+            result.output_files = list(task.output_files)
+        finally:
+            _current_task_id.reset(prev_task_id)  # 恢复上下文
 
         result.finished_at = datetime.now()
         return result

@@ -14,11 +14,15 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Optional
 from collections import deque
+from contextvars import ContextVar
 import uuid
 import threading
 import json
 import logging
 import re
+
+# ── 当前执行上下文（用于 write_file 自动关联任务）──
+_current_task_id: ContextVar[Optional[str]] = ContextVar("current_task_id", default=None)
 
 logger = logging.getLogger("smart_agent.task_manager")
 
@@ -53,6 +57,8 @@ class Task:
     metadata: dict[str, Any] = field(default_factory=dict)
     # ── 执行过程日志 ──
     event_log: list[dict] = field(default_factory=list)  # [{time, event, data}, ...]
+    # ── 输出文件追踪 ──
+    output_files: list[str] = field(default_factory=list)  # Agent 执行中写入的文件路径列表
 
     def to_dict(self) -> dict:
         return {
@@ -69,6 +75,7 @@ class Task:
             "priority": self.priority,
             "tags": self.tags,
             "event_log": self.event_log[-20:],  # 最近 20 条事件
+            "output_files": self.output_files,   # 输出文件列表
         }
 
     def add_event(self, event: str, data: Any = None):
@@ -340,6 +347,13 @@ class TaskManager:
         with self._lock:
             return dict(self._agents)
 
+    def record_output_file(self, task_id: str, filepath: str):
+        """记录任务执行过程中写入的文件（供 write_file 工具回调）"""
+        with self._lock:
+            task = self._find_task(task_id)
+            if task and filepath not in task.output_files:
+                task.output_files.append(filepath)
+
     # ======== 内部方法 ========
 
     def _find_task(self, task_id: str) -> Optional[Task]:
@@ -461,6 +475,9 @@ class TaskManager:
                 except Exception:
                     pass
 
+        # ── 设置当前任务上下文（用于 write_file 自动关联文件）──
+        _current_task_id.set(task.id)
+
         try:
             from src.core.agent import AgentEvent
             agent_proxy.agent.on_event = event_logger
@@ -478,6 +495,9 @@ class TaskManager:
             print(f"  [{agent_name}] ❌ 执行失败: {e}")
             print(f"{'='*55}\n")
             self.complete_task(task_id, "", error=str(e))
+
+        finally:
+            _current_task_id.set(None)  # 清除上下文
 
     # ======== 智能调度引擎 ========
 
