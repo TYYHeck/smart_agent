@@ -2287,40 +2287,60 @@ def init_agent():
     # ---- 数据库初始化 ----
     db_cfg = cfg.get("database", {})
     db_url = os.getenv("DATABASE_URL", "")
+    _db_initialized = False
     if db_url or db_cfg:
+        # config.yaml 的值优先于环境变量和 DATABASE_URL
+        if db_cfg:
+            os.environ["DB_HOST"] = str(db_cfg.get("host", "127.0.0.1"))
+            os.environ["DB_PORT"] = str(db_cfg.get("port", 3306))
+            os.environ["DB_USER"] = str(db_cfg.get("user", "smart_agent"))
+            os.environ["DB_PASSWORD"] = str(db_cfg.get("password", ""))
+            os.environ["DB_NAME"] = str(db_cfg.get("database", "smart_agent"))
+            os.environ.pop("DATABASE_URL", None)
+
+        from src.infrastructure.database import create_engine, get_db_url
+        from src.infrastructure.migrations import run_migrations, seed_default_admin
+
         try:
-            from src.infrastructure.database import create_engine, get_db_url
-            from src.infrastructure.migrations import run_migrations, seed_default_admin
-
-            # config.yaml 的值优先于环境变量和 DATABASE_URL
-            if db_cfg:
-                os.environ["DB_HOST"] = str(db_cfg.get("host", "127.0.0.1"))
-                os.environ["DB_PORT"] = str(db_cfg.get("port", 3306))
-                os.environ["DB_USER"] = str(db_cfg.get("user", "smart_agent"))
-                os.environ["DB_PASSWORD"] = str(db_cfg.get("password", ""))
-                os.environ["DB_NAME"] = str(db_cfg.get("database", "smart_agent"))
-                # 清除可能残留的 DATABASE_URL，强制用 config.yaml 拼出的连接串
-                os.environ.pop("DATABASE_URL", None)
+            # 步骤1: 构建 URL + 创建引擎
             url = get_db_url()
-
-            import asyncio as _asyncio
             engine = create_engine(url)
-            _asyncio.get_event_loop().run_until_complete(run_migrations(engine))
-            _asyncio.get_event_loop().run_until_complete(seed_default_admin(engine))
-            _db_initialized = True
-            logger.info("MySQL 数据库已连接并完成迁移")
+            logger.info("数据库引擎创建成功")
+        except Exception as e:
+            logger.warning(f"数据库引擎创建失败: {e}")
+            engine = None
 
+        if engine:
+            try:
+                # 步骤2: 迁移
+                import asyncio as _asyncio
+                _asyncio.get_event_loop().run_until_complete(run_migrations(engine))
+                logger.info("数据库迁移完成")
+            except Exception as e:
+                logger.warning(f"数据库迁移失败: {e}")
+                engine = None
+
+        if engine:
+            try:
+                # 步骤3: 初始化种子数据
+                import asyncio as _asyncio
+                _asyncio.get_event_loop().run_until_complete(seed_default_admin(engine))
+                _db_initialized = True
+                logger.info("MySQL 数据库已连接并完成初始化")
+            except Exception as e:
+                logger.warning(f"数据库种子数据失败: {e}")
+
+        if _db_initialized:
             # 启用任务持久化
             from src.infrastructure.task_repo import get_task_repo
             get_task_repo().enable_db()
-
             # 从数据库恢复历史任务
             try:
                 get_task_manager().load_history_from_db()
             except Exception as e:
                 logger.warning(f"历史任务恢复跳过: {e}")
-        except Exception as e:
-            logger.warning(f"MySQL 连接失败，使用内存模式: {e}")
+        else:
+            logger.warning("MySQL 连接失败，使用内存模式")
     else:
         logger.info("未配置数据库，使用内存模式")
 

@@ -42,12 +42,16 @@ def get_db_url() -> str:
     password = os.getenv("DB_PASSWORD", "")
     # MySQL 驱动限制密码不能超过 72 字节
     password_bytes = password.encode("utf-8")
+    logger.info(f"DB_PASSWORD 原始长度: {len(password_bytes)} 字节")
     if len(password_bytes) > 72:
+        logger.warning(f"DB_PASSWORD 过长 ({len(password_bytes)} 字节)，截断至 72 字节")
         password = password_bytes[:72].decode("utf-8", errors="ignore")
     database = os.getenv("DB_NAME", "smart_agent")
 
     # URL 编码，防止特殊字符导致连接串解析错误
     from urllib.parse import quote_plus
+    url = f"mysql+aiomysql://{quote_plus(user)}:****@{host}:{port}/{database}?charset=utf8mb4"
+    logger.info(f"数据库连接 URL: {url} (密码长度: {len(password_bytes)} 字节)")
     return f"mysql+aiomysql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}?charset=utf8mb4"
 
 
