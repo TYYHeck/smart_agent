@@ -2292,15 +2292,14 @@ def init_agent():
             from src.infrastructure.database import create_engine, get_db_url
             from src.infrastructure.migrations import run_migrations, seed_default_admin
 
-            url = db_url or get_db_url()
-            # 覆盖环境变量
+            # config.yaml 的值优先于环境变量
             if db_cfg:
-                os.environ.setdefault("DB_HOST", str(db_cfg.get("host", "127.0.0.1")))
-                os.environ.setdefault("DB_PORT", str(db_cfg.get("port", 3306)))
-                os.environ.setdefault("DB_USER", str(db_cfg.get("user", "smart_agent")))
-                os.environ.setdefault("DB_PASSWORD", str(db_cfg.get("password", "smart_agent_pass")))
-                os.environ.setdefault("DB_NAME", str(db_cfg.get("database", "smart_agent")))
-                url = get_db_url()
+                os.environ["DB_HOST"] = str(db_cfg.get("host", "127.0.0.1"))
+                os.environ["DB_PORT"] = str(db_cfg.get("port", 3306))
+                os.environ["DB_USER"] = str(db_cfg.get("user", "smart_agent"))
+                os.environ["DB_PASSWORD"] = str(db_cfg.get("password", ""))
+                os.environ["DB_NAME"] = str(db_cfg.get("database", "smart_agent"))
+            url = db_url or get_db_url()
 
             import asyncio as _asyncio
             engine = create_engine(url)

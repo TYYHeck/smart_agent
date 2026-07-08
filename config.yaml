@@ -100,8 +100,8 @@ server:
 database:
   host: "127.0.0.1"
   port: 3306
-  user: "smart_agent"
-  password: "smart_agent_pass"
+  user: "root"
+  password: ""
   database: "smart_agent"
   # 连接池配置
   pool_size: 10

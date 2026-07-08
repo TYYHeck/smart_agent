@@ -39,7 +39,7 @@ def get_db_url() -> str:
     host = os.getenv("DB_HOST", "127.0.0.1")
     port = os.getenv("DB_PORT", "3306")
     user = os.getenv("DB_USER", "smart_agent")
-    password = os.getenv("DB_PASSWORD", "smart_agent_pass")
+    password = os.getenv("DB_PASSWORD", "")
     # MySQL 驱动限制密码不能超过 72 字节
     password_bytes = password.encode("utf-8")
     if len(password_bytes) > 72:
