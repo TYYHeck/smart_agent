@@ -21,8 +21,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
     AsyncEngine,
 )
-from sqlalchemy.pool import QueuePool
-
 logger = logging.getLogger("smart_agent.database")
 
 _engine: Optional[AsyncEngine] = None
@@ -60,7 +58,6 @@ def create_engine(db_url: str | None = None, echo: bool = False) -> AsyncEngine:
         max_overflow=20,
         pool_recycle=3600,
         pool_pre_ping=True,
-        poolclass=QueuePool,
     )
     _session_factory = async_sessionmaker(
         _engine,
