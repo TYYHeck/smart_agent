@@ -17,8 +17,8 @@
 [Unit]
 Description=SmartAgent - AI Agent Service (Enterprise v2.0)
 Documentation=https://github.com/TYYHeck/smart_agent
-After=network.target mysql.service
-Wants=network.target mysql.service
+After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
@@ -51,18 +51,12 @@ SyslogIdentifier=smart_agent
 
 # 资源限制
 LimitNOFILE=65536
-LimitNPROC=4096
 MemoryHigh=2G
 MemoryMax=4G
 CPUQuota=200%
 
-# 安全加固
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/root/smart_agent/output /root/smart_agent/logs /root/smart_agent/data
-ReadOnlyPaths=/root/smart_agent/config.yaml /root/smart_agent/src
+# 注：ProtectHome/ProtectSystem 等 namespace 隔离与 venv 符号链接不兼容，
+# 安全通过 nginx 反向代理 + 防火墙保障
 
 [Install]
 WantedBy=multi-user.target
