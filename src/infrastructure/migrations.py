@@ -121,6 +121,12 @@ async def seed_default_admin(engine: AsyncEngine):
     admin_pass = os.getenv("ADMIN_PASSWORD", "admin123")
     admin_email = os.getenv("ADMIN_EMAIL", "admin@smartagent.local")
 
+    # bcrypt 限制密码不超过 72 字节
+    admin_bytes = admin_pass.encode("utf-8")
+    if len(admin_bytes) > 72:
+        logger.warning(f"ADMIN_PASSWORD 过长 ({len(admin_bytes)} 字节)，截断至前 72 字节")
+        admin_pass = admin_bytes[:72].decode("utf-8", errors="ignore")
+
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
     from .models import UserModel
