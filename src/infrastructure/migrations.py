@@ -113,9 +113,7 @@ async def run_migrations(engine: AsyncEngine):
 async def seed_default_admin(engine: AsyncEngine):
     """创建默认管理员账户"""
     import os
-    from passlib.context import CryptContext
-
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    import bcrypt
 
     admin_user = os.getenv("ADMIN_USER", "admin")
     admin_pass = os.getenv("ADMIN_PASSWORD", "admin123")
@@ -126,6 +124,8 @@ async def seed_default_admin(engine: AsyncEngine):
     if len(admin_bytes) > 72:
         logger.warning(f"ADMIN_PASSWORD 过长 ({len(admin_bytes)} 字节)，截断至前 72 字节")
         admin_pass = admin_bytes[:72].decode("utf-8", errors="ignore")
+
+    password_hash = bcrypt.hashpw(admin_pass.encode("utf-8"), bcrypt.gensalt()).decode()
 
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -141,7 +141,7 @@ async def seed_default_admin(engine: AsyncEngine):
         if existing is None:
             user = UserModel(
                 username=admin_user,
-                password_hash=pwd_context.hash(admin_pass),
+                password_hash=password_hash,
                 email=admin_email,
                 role="admin",
             )

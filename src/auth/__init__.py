@@ -7,13 +7,10 @@ from typing import Optional
 import os
 import logging
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 logger = logging.getLogger("smart_agent.auth")
-
-# 密码哈希
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT 配置
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "smart-agent-secret-change-in-production-2024")
@@ -22,13 +19,16 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))  # 默
 
 
 def hash_password(password: str) -> str:
-    """对密码进行 bcrypt 哈希"""
-    return pwd_context.hash(password)
+    """对密码进行 bcrypt 哈希（兼容 bcrypt 4.0+）"""
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) > 72:
+        password_bytes = password_bytes[:72]
+    return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """验证密码"""
-    return pwd_context.verify(plain_password, hashed_password)
+    """验证密码（兼容 bcrypt 4.0+）"""
+    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
 def create_access_token(
