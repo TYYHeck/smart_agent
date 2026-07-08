@@ -38,6 +38,18 @@ uvicorn>=0.27.0               # ASGI 服务器
 pyyaml>=6.0                   # YAML 配置文件解析
 python-dotenv>=1.0.0          # 环境变量管理
 
+# === 数据库 (MySQL 企业版) ===
+sqlalchemy[asyncio]>=2.0.0    # ORM + 异步支持
+aiomysql>=0.2.0               # MySQL 异步驱动
+cryptography>=41.0.0          # MySQL 认证加密
+
+# === 认证 (企业版) ===
+python-jose[cryptography]>=3.3.0  # JWT 令牌生成/验证
+passlib[bcrypt]>=1.7.4            # 密码哈希
+
+# === 系统监控 (企业版) ===
+psutil>=5.9.0                 # 系统资源监控
+
 # === 测试 ===
 pytest>=8.0.0                  # 测试框架
 pytest-asyncio>=0.23.0         # 异步测试支持

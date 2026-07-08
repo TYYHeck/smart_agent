@@ -14,13 +14,15 @@ import sys
 import os
 import json
 import asyncio
+import uuid
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, field_validator
 import uvicorn
 
 from src.core.agent import Agent, AgentEvent, create_agent
@@ -1055,7 +1057,21 @@ document.addEventListener('visibilitychange', () => {
 
 app = FastAPI(title="SmartAgent", docs_url=None, redoc_url=None)
 
+# --- CORS 中间件 ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- 速率限制、监控中间件 (延迟加载，避免循环导入) ---
+_rate_limit_middleware = None
+_prometheus_middleware = None
+
 _agent: Optional[Agent] = None
+_db_initialized = False
 
 
 def get_agent() -> Agent:
@@ -1063,6 +1079,297 @@ def get_agent() -> Agent:
     if _agent is None:
         raise RuntimeError("Agent 尚未初始化")
     return _agent
+
+
+# ============================================================
+# 健康检查
+# ============================================================
+
+@app.get("/health")
+async def health_check():
+    """健康检查端点 —— 返回服务 + DB + LLM 状态"""
+    health = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "2.0.0",
+        "checks": {
+            "server": "ok",
+            "database": "unknown",
+            "llm": "unknown",
+        },
+    }
+
+    # 检查数据库连接
+    try:
+        from src.infrastructure.database import is_db_available, _engine
+        if is_db_available() and _engine:
+            async with _engine.connect() as conn:
+                await conn.execute(
+                    __import__("sqlalchemy").text("SELECT 1")
+                )
+            health["checks"]["database"] = "ok"
+        else:
+            health["checks"]["database"] = "disabled"
+    except Exception:
+        health["checks"]["database"] = "error"
+
+    # 检查 LLM
+    try:
+        agent = _agent
+        if agent and agent.llm:
+            health["checks"]["llm"] = "ok"
+        else:
+            health["checks"]["llm"] = "not_initialized"
+    except Exception:
+        health["checks"]["llm"] = "error"
+
+    # 整体状态判定
+    if "error" in health["checks"].values():
+        health["status"] = "degraded"
+
+    return health
+
+
+# ============================================================
+# 认证 API
+# ============================================================
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+    @field_validator("username")
+    @classmethod
+    def username_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v or len(v) < 2:
+            raise ValueError("用户名至少 2 个字符")
+        if len(v) > 64:
+            raise ValueError("用户名最长 64 个字符")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_not_empty(cls, v: str) -> str:
+        if not v or len(v) < 4:
+            raise ValueError("密码至少 4 个字符")
+        return v
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    email: str = ""
+
+    @field_validator("username")
+    @classmethod
+    def username_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v or len(v) < 2:
+            raise ValueError("用户名至少 2 个字符")
+        if len(v) > 64:
+            raise ValueError("用户名最长 64 个字符")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_not_empty(cls, v: str) -> str:
+        if not v or len(v) < 6:
+            raise ValueError("密码至少 6 个字符")
+        if len(v) > 128:
+            raise ValueError("密码最长 128 个字符")
+        return v
+
+
+@app.post("/api/auth/login")
+async def api_login(req: LoginRequest):
+    """用户登录 —— 返回 JWT Token"""
+    from src.auth import verify_password, create_access_token
+    from src.infrastructure.models import UserModel
+    from sqlalchemy import select
+    from src.infrastructure.database import get_session
+
+    try:
+        async for session in get_session():
+            result = await session.execute(
+                select(UserModel).where(UserModel.username == req.username)
+            )
+            user = result.scalar_one_or_none()
+
+            if user is None or not verify_password(req.password, user.password_hash):
+                return JSONResponse(
+                    {"ok": False, "error": "用户名或密码错误"},
+                    status_code=401,
+                )
+
+            if not user.is_active:
+                return JSONResponse(
+                    {"ok": False, "error": "账户已被禁用"},
+                    status_code=403,
+                )
+
+            # 更新最后登录时间
+            user.last_login_at = datetime.utcnow()
+            await session.commit()
+
+            # 生成 Token
+            access_token = create_access_token(
+                data={"sub": user.username, "role": user.role}
+            )
+
+            return {
+                "ok": True,
+                "access_token": access_token,
+                "token_type": "bearer",
+                "user": user.to_dict(),
+            }
+    except ImportError:
+        return JSONResponse(
+            {"ok": False, "error": "认证系统未启用 (数据库不可用)"},
+            status_code=503,
+        )
+
+
+@app.post("/api/auth/register")
+async def api_register(req: RegisterRequest):
+    """用户注册"""
+    from src.auth import hash_password
+    from src.infrastructure.models import UserModel
+    from sqlalchemy import select
+    from src.infrastructure.database import get_session
+
+    try:
+        async for session in get_session():
+            # 检查用户是否已存在
+            result = await session.execute(
+                select(UserModel).where(UserModel.username == req.username)
+            )
+            if result.scalar_one_or_none() is not None:
+                return JSONResponse(
+                    {"ok": False, "error": "用户名已存在"},
+                    status_code=409,
+                )
+
+            user = UserModel(
+                username=req.username,
+                password_hash=hash_password(req.password),
+                email=req.email,
+            )
+            session.add(user)
+            await session.commit()
+
+            return {"ok": True, "message": "注册成功，请登录"}
+    except ImportError:
+        return JSONResponse(
+            {"ok": False, "error": "注册功能不可用 (数据库未启用)"},
+            status_code=503,
+        )
+
+
+@app.get("/api/auth/me")
+async def api_me(request: Request):
+    """获取当前用户信息（需要 Bearer Token）"""
+    from src.auth import decode_access_token
+    from sqlalchemy import select
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse(
+            {"ok": False, "error": "请在 Header 中提供 Bearer Token"},
+            status_code=401,
+        )
+
+    token = auth_header[7:]
+    payload = decode_access_token(token)
+    if payload is None:
+        return JSONResponse(
+            {"ok": False, "error": "令牌无效或已过期"},
+            status_code=401,
+        )
+
+    username = payload.get("sub", "")
+    if not username:
+        return JSONResponse({"ok": False, "error": "令牌内容无效"}, status_code=401)
+
+    try:
+        from src.infrastructure.database import get_session
+        from src.infrastructure.models import UserModel
+
+        async for session in get_session():
+            result = await session.execute(
+                select(UserModel).where(
+                    UserModel.username == username,
+                    UserModel.is_active == True,
+                )
+            )
+            user = result.scalar_one_or_none()
+
+            if user is None:
+                return JSONResponse(
+                    {"ok": False, "error": "用户不存在或已被禁用"},
+                    status_code=401,
+                )
+
+            return {"ok": True, "user": user.to_dict()}
+    except ImportError:
+        return JSONResponse(
+            {"ok": False, "error": "认证系统未启用"},
+            status_code=503,
+        )
+
+
+# ============================================================
+# 监控 API
+# ============================================================
+
+@app.get("/metrics")
+async def api_metrics():
+    """Prometheus 指标端点"""
+    try:
+        from src.middleware.metrics import get_metrics_text
+        return Response(content=get_metrics_text(), media_type="text/plain; version=0.0.4")
+    except ImportError:
+        return Response(content="# metrics disabled\n", media_type="text/plain")
+
+
+# ============================================================
+# 系统 API
+# ============================================================
+
+@app.get("/api/system/info")
+async def api_system_info():
+    """系统信息（运行状态、数据库状态等）"""
+    import platform
+    import psutil
+
+    process = psutil.Process()
+    mem = process.memory_info()
+
+    db_status = "disabled"
+    try:
+        from src.infrastructure.database import is_db_available
+        db_status = "connected" if is_db_available() else "disabled"
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "system": {
+            "python_version": platform.python_version(),
+            "platform": platform.platform(),
+            "cpu_count": psutil.cpu_count(),
+            "memory_used_mb": round(mem.rss / 1024 / 1024, 2),
+            "uptime_seconds": round(
+                (datetime.now() - datetime.fromtimestamp(process.create_time())).total_seconds()
+            ),
+        },
+        "database": db_status,
+        "agent": {
+            "name": _agent.name if _agent else "N/A",
+            "model": _agent.llm.config.model if _agent and _agent.llm else "N/A",
+            "provider": _agent.llm.config.provider if _agent and _agent.llm else "N/A",
+        },
+    }
 
 
 # ============================================================
@@ -1490,10 +1797,11 @@ async def api_config_update(req: UpdateConfigRequest):
 # ============================================================
 
 def init_agent():
-    """初始化全局 Agent 实例"""
-    global _agent
+    """初始化全局 Agent 实例 + 数据库 + 日志"""
+    global _agent, _db_initialized
 
     import yaml
+    import logging
 
     config_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -1506,6 +1814,79 @@ def init_agent():
     else:
         cfg = {}
 
+    # ---- 结构化日志 ----
+    log_cfg = cfg.get("logging", {})
+    try:
+        from src.core.logging_config import setup_logging
+
+        setup_logging(
+            level=log_cfg.get("level", "INFO"),
+            log_dir=log_cfg.get("dir", "./logs"),
+            json_format=log_cfg.get("json_format", False),
+            enable_mysql=log_cfg.get("mysql_errors", False),
+        )
+    except Exception:
+        logging.basicConfig(level=logging.INFO)
+
+    logger = logging.getLogger("smart_agent.web")
+
+    # ---- 数据库初始化 ----
+    db_cfg = cfg.get("database", {})
+    db_url = os.getenv("DATABASE_URL", "")
+    if db_url or db_cfg:
+        try:
+            from src.infrastructure.database import create_engine, get_db_url
+            from src.infrastructure.migrations import run_migrations, seed_default_admin
+
+            url = db_url or get_db_url()
+            # 覆盖环境变量
+            if db_cfg:
+                os.environ.setdefault("DB_HOST", str(db_cfg.get("host", "127.0.0.1")))
+                os.environ.setdefault("DB_PORT", str(db_cfg.get("port", 3306)))
+                os.environ.setdefault("DB_USER", str(db_cfg.get("user", "smart_agent")))
+                os.environ.setdefault("DB_PASSWORD", str(db_cfg.get("password", "smart_agent_pass")))
+                os.environ.setdefault("DB_NAME", str(db_cfg.get("database", "smart_agent")))
+                url = get_db_url()
+
+            import asyncio as _asyncio
+            engine = create_engine(url)
+            _asyncio.get_event_loop().run_until_complete(run_migrations(engine))
+            _asyncio.get_event_loop().run_until_complete(seed_default_admin(engine))
+            _db_initialized = True
+            logger.info("MySQL 数据库已连接并完成迁移")
+
+            # 启用任务持久化
+            from src.infrastructure.task_repo import get_task_repo
+            get_task_repo().enable_db()
+        except Exception as e:
+            logger.warning(f"MySQL 连接失败，使用内存模式: {e}")
+    else:
+        logger.info("未配置数据库，使用内存模式")
+
+    # ---- 中间件安装 ----
+    rl_cfg = cfg.get("rate_limit", {})
+    if rl_cfg.get("enabled", True):
+        try:
+            from src.middleware.rate_limiter import RateLimitMiddleware
+            app.add_middleware(
+                RateLimitMiddleware,
+                max_requests=rl_cfg.get("max_requests_per_minute", 120),
+                burst=rl_cfg.get("burst", 30),
+            )
+            logger.info(f"速率限制已启用: {rl_cfg.get('max_requests_per_minute', 120)}次/分钟")
+        except Exception as e:
+            logger.warning(f"速率限制加载失败: {e}")
+
+    mon_cfg = cfg.get("monitoring", {})
+    if mon_cfg.get("enabled", True):
+        try:
+            from src.middleware.metrics import PrometheusMiddleware
+            app.add_middleware(PrometheusMiddleware)
+            logger.info("Prometheus 监控已启用")
+        except Exception as e:
+            logger.warning(f"监控中间件加载失败: {e}")
+
+    # ---- Agent 初始化 ----
     llm_cfg = cfg.get("llm", {})
     agent_cfg = cfg.get("agent", {})
 
@@ -1528,10 +1909,16 @@ def init_agent():
     if hasattr(_agent, '_rebuild_graph'):
         _agent._rebuild_graph()
 
+    logger.info(f"Agent '{_agent.name}' 初始化完成 (模型: {llm_cfg.get('model', 'N/A')})")
+
 
 def start(host: str = "127.0.0.1", port: int = 8080):
     """启动 Web 服务"""
+    import logging
+
     init_agent()
+
+    logger = logging.getLogger("smart_agent.web")
 
     # 注册默认 Agent 到任务管理器并启动调度器
     tm = get_task_manager()
@@ -1539,9 +1926,13 @@ def start(host: str = "127.0.0.1", port: int = 8080):
     tm.register_agent(proxy)
     tm.start_dispatcher()
 
-    print(f"\n  SmartAgent Web 界面已启动")
+    db_status = "MySQL" if _db_initialized else "内存"
+    print(f"\n  {'='*50}")
+    print(f"  SmartAgent 企业版 v2.0 已启动")
     print(f"  地址: http://{host}:{port}")
     print(f"  Agent: {_agent.name} 已注册  |  任务调度器已启动")
-    print(f"  基于 LangChain ReAct 架构")
-    print(f"  按 Ctrl+C 停止\n")
+    print(f"  存储: {db_status}  |  日志: ./logs/")
+    print(f"  健康检查: http://{host}:{port}/health")
+    print(f"  Prometheus: http://{host}:{port}/metrics")
+    print(f"  {'='*50}\n")
     uvicorn.run(app, host=host, port=port, log_level="warning")

@@ -1,0 +1,68 @@
+# ============================================
+# SmartAgent systemd 服务文件
+# ============================================
+#
+# 部署步骤:
+#   1. sudo cp deploy/smart_agent.service /etc/systemd/system/
+#   2. sudo systemctl daemon-reload
+#   3. sudo systemctl enable smart_agent
+#   4. sudo systemctl start smart_agent
+#   5. sudo systemctl status smart_agent
+#
+# 常用命令:
+#   sudo systemctl restart smart_agent    # 重启
+#   sudo systemctl stop smart_agent       # 停止
+#   sudo journalctl -u smart_agent -f     # 查看日志
+
+[Unit]
+Description=SmartAgent - AI Agent Service (Enterprise v2.0)
+Documentation=https://github.com/TYYHeck/smart_agent
+After=network.target mysql.service
+Wants=network.target mysql.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/smart_agent
+
+# 环境变量
+EnvironmentFile=/root/smart_agent/.env
+Environment="PATH=/root/smart_agent/venv/bin:/usr/local/bin:/usr/bin:/bin"
+
+# 启动命令
+ExecStart=/root/smart_agent/venv/bin/python main.py --web --host 0.0.0.0 --port 8080
+
+# 重启策略
+Restart=always
+RestartSec=5
+StartLimitInterval=60
+StartLimitBurst=3
+
+# 进程管理
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# 日志 (journald)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=smart_agent
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryHigh=2G
+MemoryMax=4G
+CPUQuota=200%
+
+# 安全加固
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/root/smart_agent/output /root/smart_agent/logs /root/smart_agent/data
+ReadOnlyPaths=/root/smart_agent/config.yaml /root/smart_agent/src
+
+[Install]
+WantedBy=multi-user.target

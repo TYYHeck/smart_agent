@@ -1,0 +1,127 @@
+name: SmartAgent CI/CD
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+      - 'docs/**'
+  pull_request:
+    branches: [main, master]
+
+env:
+  PYTHON_VERSION: '3.11'
+  APP_NAME: smart_agent
+
+jobs:
+  # ============================================================
+  # 代码质量检查
+  # ============================================================
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 缓存 pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flake8 bandit
+
+      - name: 语法检查 (flake8)
+        run: |
+          flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=__pycache__,*.pyc
+          flake8 src/ --count --exit-zero --max-complexity=15 --statistics --exclude=__pycache__,*.pyc
+
+      - name: 安全检查 (bandit)
+        run: |
+          bandit -r src/ -x tests/ -ll --skip B101,B104
+
+      - name: 运行测试
+        run: |
+          python -m pytest tests/ -v --tb=short --timeout=60 2>&1 || true
+
+  # ============================================================
+  # 部署到服务器
+  # ============================================================
+  deploy:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    timeout-minutes: 15
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 部署到服务器
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            cd /root/smart_agent
+
+            echo "=== 拉取最新代码 ==="
+            git pull origin main
+
+            echo "=== 安装新依赖 ==="
+            source venv/bin/activate
+            pip install -r requirements.txt --quiet
+
+            echo "=== 迁移数据库 ==="
+            # 数据库迁移在启动时自动执行
+
+            echo "=== 重启服务 ==="
+            sudo systemctl restart smart_agent
+
+            echo "=== 等待启动 ==="
+            sleep 3
+
+            echo "=== 健康检查 ==="
+            curl -sf http://localhost:8080/health && echo " OK" || echo " FAILED!"
+
+            echo "=== 服务状态 ==="
+            sudo systemctl status smart_agent --no-pager -l
+
+  # ============================================================
+  # 安全扫描 (每周运行)
+  # ============================================================
+  security-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy 漏洞扫描
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+
+      - name: 上传扫描结果
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif

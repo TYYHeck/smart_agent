@@ -1,5 +1,5 @@
 # ============================================
-# SmartAgent 配置文件
+# SmartAgent 配置文件 (企业版 v2.0)
 # 基于 LangChain ReAct 架构
 # ============================================
 
@@ -94,3 +94,44 @@ tracing:
 server:
   host: "127.0.0.1"
   port: 8080
+
+# --- MySQL 数据库 (企业版) ---
+# 留空则使用内存模式 (兼容旧版)
+database:
+  host: "127.0.0.1"
+  port: 3306
+  user: "smart_agent"
+  password: "smart_agent_pass"
+  database: "smart_agent"
+  # 连接池配置
+  pool_size: 10
+  max_overflow: 20
+  pool_recycle: 3600
+
+# --- 认证 (企业版) ---
+auth:
+  enabled: true                    # 设为 false 关闭认证
+  jwt_secret_key: ""               # 留空自动生成 (生产环境务必设置!)
+  jwt_expire_minutes: 480          # Token 有效期 (分钟)
+  bcrypt_rounds: 12
+
+# --- 速率限制 (企业版) ---
+rate_limit:
+  enabled: true
+  max_requests_per_minute: 120     # 每 IP 每分钟最大请求数
+  burst: 30                        # 突发容量
+  # 白名单 IP (不受限制)
+  whitelist_ips: []
+
+# --- 日志 (企业版) ---
+logging:
+  level: "INFO"                    # DEBUG / INFO / WARNING / ERROR
+  dir: "./logs"
+  json_format: false               # true = JSON 格式 (适合 ELK 采集)
+  mysql_errors: true               # ERROR 级别日志写入 MySQL
+
+# --- 监控 (企业版) ---
+monitoring:
+  enabled: true
+  metrics_path: "/metrics"         # Prometheus 抓取路径
+  health_path: "/health"           # 健康检查路径

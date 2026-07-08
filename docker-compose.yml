@@ -1,17 +1,57 @@
 version: "3.8"
 
 services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: smart_agent_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_pass_123}
+      MYSQL_DATABASE: smart_agent
+      MYSQL_USER: smart_agent
+      MYSQL_PASSWORD: ${DB_PASSWORD:-smart_agent_pass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./deploy/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_pass_123}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # SmartAgent 应用
   smart_agent:
     build: .
-    container_name: smart_agent
+    container_name: smart_agent_app
     ports:
       - "8080:8080"
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=smart_agent
+      - DB_PASSWORD=${DB_PASSWORD:-smart_agent_pass}
+      - DB_NAME=smart_agent
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-smart-agent-enterprise-secret}
+      - JWT_EXPIRE_MINUTES=480
     volumes:
-      # 挂载配置文件（方便在线修改）
       - ./config.yaml:/app/config.yaml:ro
-      # 持久化运行时数据
       - ./data:/app/data
       - ./output:/app/output
+      - ./logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  mysql_data:
+    driver: local

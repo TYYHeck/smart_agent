@@ -109,6 +109,54 @@ class ServerConfig:
     port: int = 8080
 
 
+@dataclass
+class DatabaseConfig:
+    """MySQL 数据库配置"""
+    host: str = "127.0.0.1"
+    port: int = 3306
+    user: str = "smart_agent"
+    password: str = "smart_agent_pass"
+    database: str = "smart_agent"
+    pool_size: int = 10
+    max_overflow: int = 20
+    pool_recycle: int = 3600
+
+
+@dataclass
+class AuthConfig:
+    """认证配置"""
+    enabled: bool = True
+    jwt_secret_key: str = ""
+    jwt_expire_minutes: int = 480
+    bcrypt_rounds: int = 12
+
+
+@dataclass
+class RateLimitConfig:
+    """速率限制配置"""
+    enabled: bool = True
+    max_requests_per_minute: int = 120
+    burst: int = 30
+    whitelist_ips: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LoggingConfig:
+    """日志配置"""
+    level: str = "INFO"
+    dir: str = "./logs"
+    json_format: bool = False
+    mysql_errors: bool = True
+
+
+@dataclass
+class MonitoringConfig:
+    """监控配置"""
+    enabled: bool = True
+    metrics_path: str = "/metrics"
+    health_path: str = "/health"
+
+
 # ============================================================
 # 总配置
 # ============================================================
@@ -123,6 +171,11 @@ class AppConfig:
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
 
     # ======== 可用模型列表 ========
     available_models: list[dict] = field(default_factory=lambda: [
@@ -226,6 +279,59 @@ def _parse_config(raw: dict) -> AppConfig:
         cfg.server = ServerConfig(
             host=srv_raw.get("host", cfg.server.host),
             port=srv_raw.get("port", cfg.server.port),
+        )
+
+    # Database
+    db_raw = raw.get("database", {})
+    if db_raw:
+        cfg.database = DatabaseConfig(
+            host=db_raw.get("host", cfg.database.host),
+            port=db_raw.get("port", cfg.database.port),
+            user=db_raw.get("user", cfg.database.user),
+            password=db_raw.get("password", cfg.database.password),
+            database=db_raw.get("database", cfg.database.database),
+            pool_size=db_raw.get("pool_size", cfg.database.pool_size),
+            max_overflow=db_raw.get("max_overflow", cfg.database.max_overflow),
+            pool_recycle=db_raw.get("pool_recycle", cfg.database.pool_recycle),
+        )
+
+    # Auth
+    auth_raw = raw.get("auth", {})
+    if auth_raw:
+        cfg.auth = AuthConfig(
+            enabled=auth_raw.get("enabled", cfg.auth.enabled),
+            jwt_secret_key=auth_raw.get("jwt_secret_key", cfg.auth.jwt_secret_key),
+            jwt_expire_minutes=auth_raw.get("jwt_expire_minutes", cfg.auth.jwt_expire_minutes),
+            bcrypt_rounds=auth_raw.get("bcrypt_rounds", cfg.auth.bcrypt_rounds),
+        )
+
+    # Rate Limit
+    rl_raw = raw.get("rate_limit", {})
+    if rl_raw:
+        cfg.rate_limit = RateLimitConfig(
+            enabled=rl_raw.get("enabled", cfg.rate_limit.enabled),
+            max_requests_per_minute=rl_raw.get("max_requests_per_minute", cfg.rate_limit.max_requests_per_minute),
+            burst=rl_raw.get("burst", cfg.rate_limit.burst),
+            whitelist_ips=rl_raw.get("whitelist_ips", cfg.rate_limit.whitelist_ips),
+        )
+
+    # Logging
+    log_raw = raw.get("logging", {})
+    if log_raw:
+        cfg.logging = LoggingConfig(
+            level=log_raw.get("level", cfg.logging.level),
+            dir=log_raw.get("dir", cfg.logging.dir),
+            json_format=log_raw.get("json_format", cfg.logging.json_format),
+            mysql_errors=log_raw.get("mysql_errors", cfg.logging.mysql_errors),
+        )
+
+    # Monitoring
+    mon_raw = raw.get("monitoring", {})
+    if mon_raw:
+        cfg.monitoring = MonitoringConfig(
+            enabled=mon_raw.get("enabled", cfg.monitoring.enabled),
+            metrics_path=mon_raw.get("metrics_path", cfg.monitoring.metrics_path),
+            health_path=mon_raw.get("health_path", cfg.monitoring.health_path),
         )
 
     return cfg
