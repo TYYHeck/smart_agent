@@ -81,7 +81,7 @@ class Task:
             "tags": self.tags,
             "event_log": self.event_log[-20:],  # 最近 20 条事件
             "output_files": self.output_files,   # 输出文件列表
-        }
+            "metadata_": dict(self.metadata),     # 编排信息等
 
     def add_event(self, event: str, data: Any = None):
         """记录执行过程事件"""

@@ -222,19 +222,14 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .combo-item:hover,.combo-item.active { background:var(--card); color:var(--primary); }
 .combo-item .combo-hint { font-size:11px; color:var(--muted); margin-left:auto; }
 .combo-item .combo-desc { font-size:11px; color:var(--muted); }
-/* 多 Agent 编排面板 */
-.orchestrate-section { background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:16px; overflow:hidden; }
-.orchestrate-header { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; cursor:pointer; user-select:none; transition:background .2s; }
-.orchestrate-header:hover { background:rgba(88,166,255,.05); }
-.orchestrate-body { padding:0 16px 12px; border-top:1px solid var(--border); }
-.orchestrate-body .publish-form { padding-top:12px; }
-.orchestrate-body .publish-form input { background:var(--bg); }
-.orchestrate-body .form-select { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px; color:var(--text); font-size:14px; outline:none; cursor:pointer; }
-.orchestrate-body .form-select:focus { border-color:var(--purple); }
-.orchestrate-body .publish-form button { background:var(--purple); }
-.orchestrate-body .publish-form button:hover { opacity:.85; }
+/* 执行模式切换 */
+.mode-toggle { display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.mode-btn { padding:8px 14px; font-size:13px; background:transparent; border:none; color:var(--muted); cursor:pointer; transition:all .2s; white-space:nowrap; border-right:1px solid var(--border); }
+.mode-btn:last-child { border-right:none; }
+.mode-btn:hover { color:var(--text); background:rgba(88,166,255,.05); }
+.mode-btn.active { background:rgba(88,166,255,.12); color:var(--primary); font-weight:bold; }
 /* 编排实时面板 */
-.orch-live-container { margin-top:12px; }
+.orch-live-container { margin:0 0 12px; }
 .orch-flow { display:flex; flex-direction:column; gap:8px; }
 .orch-stage-card { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; animation:fadeIn .3s; }
 .orch-stage-card.stage-active { border-color:var(--primary); box-shadow:0 0 8px rgba(88,166,255,.15); }
@@ -251,7 +246,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .orch-agent-tag.done { background:rgba(63,185,80,.2); color:var(--success); }
 .orch-agent-tag.error { background:rgba(248,81,73,.2); color:var(--error); }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
-/* 模式检测卡片 */
+/* 模式徽章 */
 .orch-mode-badge { display:inline-block; padding:4px 12px; border-radius:6px; font-size:13px; font-weight:bold; letter-spacing:1px; }
 .orch-mode-badge.auto { background:rgba(163,113,247,.2); color:var(--purple); }
 .orch-mode-badge.single { background:rgba(88,166,255,.2); color:var(--primary); }
@@ -267,7 +262,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .orch-summary-box { background:var(--bg); border:2px solid var(--purple); border-radius:8px; padding:12px; margin-top:8px; }
 .orch-summary-box .summary-title { font-size:14px; color:var(--purple); font-weight:bold; margin-bottom:8px; }
 .orch-summary-box .summary-text { font-size:13px; color:var(--text); line-height:1.6; white-space:pre-wrap; }
-/* 流程指示器（流水线/并行模式） */
+/* 编排流程指示器 */
 .orch-flow-indicator { display:flex; align-items:center; gap:6px; padding:8px 0; flex-wrap:wrap; }
 .orch-flow-node { padding:6px 12px; border-radius:16px; font-size:12px; background:var(--card); border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
 .orch-flow-node.active { background:rgba(88,166,255,.15); border-color:var(--primary); color:var(--primary); }
@@ -277,6 +272,9 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .orch-output-files { margin-top:8px; }
 .orch-output-files a { color:var(--primary); font-size:12px; text-decoration:none; margin-right:12px; }
 .orch-output-files a:hover { text-decoration:underline; }
+/* 编排结果内嵌到任务卡片 */
+.task-card-orch { margin-top:8px; padding:8px 12px; background:rgba(88,166,255,.04); border-radius:6px; border-left:3px solid var(--purple); }
+.task-card-orch .orch-mode-badge { font-size:11px; padding:2px 8px; margin-right:6px; }
 .slash-dropdown { display:none; position:absolute; bottom:100%; left:0; min-width:240px; background:var(--sidebar); border:1px solid var(--border); border-radius:8px; max-height:240px; overflow-y:auto; z-index:200; margin-bottom:4px; box-shadow:0 -2px 12px rgba(0,0,0,.4); }
 .slash-dropdown.show { display:block; }
 .slash-item { padding:10px 14px; cursor:pointer; display:flex; align-items:center; gap:10px; color:var(--text); }
@@ -364,42 +362,29 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
   <div id="tab-tasks" class="tab-content">
     <div class="task-panel">
       <h2>任务管理</h2>
-      <!-- 单 Agent 发布 -->
+      <!-- 统一发布区 -->
       <div class="publish-form">
         <input id="taskInput" placeholder="输入任务描述..." onkeydown="if(event.key==='Enter')publishTask()">
         <div class="combo-wrapper" id="agentComboWrapper" style="min-width:140px;">
           <input class="combo-input" id="agentComboInput" placeholder="自动分配" autocomplete="off" style="border-radius:8px;padding:10px 28px 10px 12px;">
           <span class="combo-arrow">▼</span><div class="combo-dropdown" id="agentComboDropdown"></div>
         </div>
-        <button onclick="publishTask()">发布任务</button>
+        <!-- 执行模式切换 -->
+        <div class="mode-toggle" id="modeToggle">
+          <button class="mode-btn active" onclick="setExecMode('single',this)">👤 单 Agent</button>
+          <button class="mode-btn" onclick="setExecMode('orchestrated',this)">🤖 多 Agent 编排</button>
+        </div>
+        <select id="orchModeSelect" class="form-select" style="min-width:130px;display:none;" onchange="onOrchModeChange()">
+          <option value="auto">自动选择策略</option>
+          <option value="parallel">⚡ 并行执行</option>
+          <option value="pipeline">🔗 流水线</option>
+          <option value="collaborative">🤝 协作讨论</option>
+        </select>
+        <button onclick="publishTask()" id="publishBtn">发布任务</button>
       </div>
-      <!-- 多 Agent 编排执行 -->
-      <div class="orchestrate-section">
-        <div class="orchestrate-header" onclick="toggleOrchestratePanel()">
-          <span>🤖 <b>多 Agent 协作编排</b></span>
-          <span style="font-size:12px;color:var(--muted);">点击展开</span>
-          <span id="orchToggleIcon" style="font-size:12px;">▼</span>
-        </div>
-        <div class="orchestrate-body" id="orchestrateBody" style="display:none;">
-          <div class="publish-form" style="margin-top:0;border-top:none;padding-top:8px;">
-            <input id="orchTaskInput" placeholder="输入复杂任务描述（多步骤、分析、对比等）...">
-            <select id="orchModeSelect" class="form-select" style="min-width:150px;" onchange="onOrchModeChange()">
-              <option value="auto">🤖 自动选择</option>
-              <option value="single">👤 单 Agent</option>
-              <option value="parallel">⚡ 并行执行</option>
-              <option value="pipeline">🔗 流水线</option>
-              <option value="collaborative">🤝 协作讨论</option>
-            </select>
-            <button onclick="executeOrchestrated()" id="orchExecBtn" style="background:var(--purple);">编排执行</button>
-          </div>
-          <div id="orchModeHint" style="font-size:11px;color:var(--muted);padding:0 0 8px 0;border-bottom:1px solid var(--border);">
-            自动分析任务特征，智能选择最优执行策略
-          </div>
-          <!-- 实时协作面板 -->
-          <div id="orchLivePanel" style="display:none;">
-            <div id="orchLiveContent"></div>
-          </div>
-        </div>
+      <!-- 编排实时面板 -->
+      <div id="orchLivePanel" style="display:none;">
+        <div id="orchLiveContent"></div>
       </div>
       <div style="margin-bottom:12px;" id="taskFilterBar">
         <button onclick="filterTasks('', this)" class="btn btn-outline btn-sm task-filter active">全部</button>
@@ -831,13 +816,40 @@ async function sendMessage() {
 }
 
 // ==================== 任务管理 ====================
+let execMode = 'single';          // 'single' | 'orchestrated'
+let orchAbortController = null;
+let orchIsExecuting = false;
+
+function setExecMode(mode, btn) {
+  execMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const orchSelect = $('orchModeSelect');
+  orchSelect.style.display = mode === 'orchestrated' ? '' : 'none';
+  // 更新按钮文字
+  const pubBtn = $('publishBtn');
+  pubBtn.textContent = mode === 'orchestrated' ? '编排执行' : '发布任务';
+  pubBtn.style.background = mode === 'orchestrated' ? 'var(--purple)' : '';
+}
+
+function onOrchModeChange() {}  // placeholder, hint 已集成到模式徽章
+
 async function publishTask() {
   const input = $('taskInput'), desc = input.value.trim();
-  if(!desc) return;
-  try {
-    await api('/api/tasks/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:desc,target_agent:selectedAgent})});
-    input.value=''; refreshTasks('');
-  } catch(e) { console.error(e); }
+  if (!desc) return;
+  if (orchIsExecuting) return;
+
+  if (execMode === 'orchestrated') {
+    await executeOrchestrated(desc);
+  } else {
+    try {
+      await api('/api/tasks/publish', {
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({description:desc,target_agent:selectedAgent})
+      });
+      input.value=''; refreshTasks('');
+    } catch(e) { console.error(e); }
+  }
 }
 
 async function filterTasks(status, btn) {
@@ -854,11 +866,19 @@ async function refreshTasks(status) {
     const data = await api(url);
     const list = $('taskList');
     if(!data.tasks||data.tasks.length===0) { list.innerHTML='<div style="color:var(--muted);padding:20px;">暂无任务</div>'; return; }
-    list.innerHTML = data.tasks.map(t => `
+    list.innerHTML = data.tasks.map(t => {
+      // 编排任务标记
+      const meta = t.metadata_ || {};
+      const isOrch = meta.orchestration_mode;
+      const orchBadge = isOrch
+        ? `<span class="orch-mode-badge ${isOrch}" style="font-size:10px;padding:1px 6px;margin-left:6px;">${isOrch.toUpperCase()}</span>`
+        : '';
+
+      return `
       <div class="task-card">
         <div class="task-info" style="cursor:pointer;" onclick="showTaskDetailModal('${t.id}')">
-          <div class="task-title">${escHtml(t.title||t.description||'').slice(0,60)}</div>
-          <div class="task-meta">ID: ${t.id} | ${(t.created_at||'').slice(0,16)} | Agent: ${t.assigned_agent||'-'}</div>
+          <div class="task-title">${escHtml(t.title||t.description||'').slice(0,60)}${orchBadge}</div>
+          <div class="task-meta">ID: ${t.id} | ${(t.created_at||'').slice(0,16)} | Agent: ${t.assigned_agent||'-'}${isOrch ? ' | 多Agent协作' : ''}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span class="status-badge ${t.status}">${t.status}</span>
@@ -866,8 +886,8 @@ async function refreshTasks(status) {
           ${t.status==='pending'?`<button class="btn btn-outline btn-sm" onclick="showEditTaskModal('${t.id}')">编辑</button>`:''}
           ${t.status==='pending'||t.status==='running'?`<button class="btn btn-danger btn-sm" onclick="cancelTask('${t.id}')">取消</button>`:''}
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   } catch(e) { console.error(e); }
 }
 
@@ -906,43 +926,12 @@ async function cancelTask(taskId) {
 }
 
 // ==================== 多 Agent 编排执行 ====================
-let orchAbortController = null;
-let orchIsExecuting = false;
 
-function toggleOrchestratePanel() {
-  const body = $('orchestrateBody');
-  const icon = $('orchToggleIcon');
-  if (body.style.display === 'none') {
-    body.style.display = 'block';
-    icon.textContent = '▲';
-  } else {
-    body.style.display = 'none';
-    icon.textContent = '▼';
-  }
-}
-
-function onOrchModeChange() {
-  const mode = $('orchModeSelect').value;
-  const hints = {
-    auto: '🤖 自动分析任务特征，智能选择最优执行策略',
-    single: '👤 单个 Agent 独立执行 — 适合简单问答、单一操作',
-    parallel: '⚡ 多个 Agent 同时执行，结果汇总 — 适合多角度分析、对比',
-    pipeline: '🔗 Agent 串行接力，前一步输出→后一步输入 — 适合多步骤流程',
-    collaborative: '🤝 Agent 团队讨论互审 — 适合决策、评估、头脑风暴'
-  };
-  $('orchModeHint').textContent = hints[mode] || '';
-}
-
-async function executeOrchestrated() {
-  const input = $('orchTaskInput');
-  const desc = input.value.trim();
-  if (!desc) return;
-  if (orchIsExecuting) return;
-
+async function executeOrchestrated(desc) {
   orchIsExecuting = true;
-  const execBtn = $('orchExecBtn');
-  execBtn.disabled = true;
-  execBtn.textContent = '执行中...';
+  const pubBtn = $('publishBtn');
+  pubBtn.disabled = true;
+  pubBtn.textContent = '执行中...';
 
   // 显示实时面板
   const livePanel = $('orchLivePanel');
@@ -1000,10 +989,10 @@ async function executeOrchestrated() {
   }
 
   orchIsExecuting = false;
-  execBtn.disabled = false;
-  execBtn.textContent = '编排执行';
+  pubBtn.disabled = false;
+  pubBtn.textContent = '编排执行';
   orchAbortController = null;
-  input.value = '';
+  $('taskInput').value = '';
   refreshTasks('');
 }
 
@@ -1178,6 +1167,19 @@ async function showTaskDetailModal(taskId) {
     const statusMap = {pending:'待处理',running:'执行中',completed:'已完成',failed:'失败',cancelled:'已取消'};
     const statusClass = t.status;
 
+    // 编排信息
+    const meta = t.metadata_ || {};
+    const isOrch = meta.orchestration_mode;
+    const orchInfo = isOrch ? `
+        <div class="detail-section">
+          <div class="detail-label">编排模式</div>
+          <div class="detail-value">
+            <span class="orch-mode-badge ${isOrch}">${isOrch.toUpperCase()}</span>
+            ${meta.orchestration_reason ? `<span style="margin-left:8px;font-size:12px;color:var(--muted);">${escHtml(meta.orchestration_reason)}</span>` : ''}
+            ${meta.orchestration_agents ? `<div style="margin-top:4px;font-size:12px;color:var(--muted);">参与Agent: ${meta.orchestration_agents.map(a => `<span class="orch-agent-tag done">${escHtml(a)}</span>`).join(' ')}</div>` : ''}
+          </div>
+        </div>` : '';
+
     // 事件日志渲染
     const eventsHtml = (t.event_log||[]).length>0
       ? t.event_log.map(e => {
@@ -1224,6 +1226,7 @@ async function showTaskDetailModal(taskId) {
           <div class="detail-label">优先级 / 标签</div>
           <div class="detail-value">${t.priority||0} &nbsp; ${(t.tags||[]).map(tg=>`<span class="skill-tag">${escHtml(tg)}</span>`).join('')}</div>
         </div>
+        ${orchInfo}
         <div class="detail-section">
           <div class="detail-label">时间</div>
           <div class="detail-value">创建: ${formatTime(t.created_at)}<br>开始: ${formatTime(t.started_at)}<br>完成: ${formatTime(t.finished_at)}</div>

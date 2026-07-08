@@ -245,6 +245,11 @@ class Orchestrator:
             started_at=datetime.now(),
         )
 
+        # 任务元数据（供前端详情展示）
+        task.metadata["orchestration_mode"] = mode.value
+        task.metadata["orchestration_reason"] = mode_reason
+        task.metadata["orchestration_agents"] = agent_names or []
+
         # 获取可用 Agent
         agents = self._resolve_agents(agent_names)
 
@@ -255,6 +260,16 @@ class Orchestrator:
             return result
 
         result.agents_used = [a.name for a in agents]
+
+        # 更新元数据中的实际 Agent 列表
+        task.metadata["orchestration_agents"] = result.agents_used
+
+        # 注册到 TaskManager 历史（让前端任务列表/详情可查看）
+        task.status = TaskStatus.RUNNING
+        task.started_at = datetime.now()
+        with self._tm._lock:
+            self._tm._history.append(task)
+        self._tm._persist_task(task)
 
         # 日志
         logger.info(
@@ -280,10 +295,18 @@ class Orchestrator:
             logger.error(f"[Orchestrator] 执行失败: {e}")
             result.success = False
             result.error = str(e)
+            task.status = TaskStatus.FAILED
+            task.error = str(e)
         else:
             # 收集输出文件（write_file 通过 _current_task_id 自动关联了 task）
             result.output_files = list(task.output_files)
+            task.status = TaskStatus.COMPLETED
+            task.result = result.final_result
         finally:
+            task.finished_at = datetime.now()
+            # 持久化任务结果
+            self._tm._persist_task(task)
+            self._tm._persist_events(task)
             _current_task_id.reset(prev_task_id)  # 恢复上下文
 
         result.finished_at = datetime.now()
