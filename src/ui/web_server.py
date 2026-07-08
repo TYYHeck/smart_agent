@@ -2906,11 +2906,16 @@ def init_agent():
             # 启用任务持久化
             from src.infrastructure.task_repo import get_task_repo
             get_task_repo().enable_db()
-            # 从数据库恢复历史任务（使用同一个 loop）
+            # 从数据库恢复历史任务 + Agent（必须在 dispose 之前）
             try:
                 _db_loop.run_until_complete(_load_history_async())
             except Exception as e:
                 logger.warning(f"历史任务恢复跳过: {e}")
+            try:
+                tm = get_task_manager()
+                _db_loop.run_until_complete(_restore_agents(tm))
+            except Exception as e:
+                logger.warning(f"Agent 恢复跳过: {e}")
 
             # 清空 _db_loop 绑定的连接池，后续 uvicorn loop 自行创建连接
             try:
@@ -3032,13 +3037,6 @@ def start(host: str = "127.0.0.1", port: int = 8080):
     proxy = AgentProxy(name=_agent.name, agent=_agent)
     tm.register_agent(proxy)
     tm.start_dispatcher()
-
-    # 从数据库恢复历史 Agent（复用数据库 loop）
-    if _db_initialized:
-        try:
-            _db_loop.run_until_complete(_restore_agents(tm))
-        except Exception as e:
-            logger.warning(f"Agent 恢复跳过: {e}")
 
     # 挂载多 Agent 编排器
     try:
