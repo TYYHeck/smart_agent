@@ -2402,7 +2402,7 @@ def start(host: str = "127.0.0.1", port: int = 8080):
 
     db_status = "MySQL" if _db_initialized else "内存"
     print(f"\n  {'='*50}")
-    print(f"  SmartAgent 企业版 v2.0 已启动")
+    print(f"  SmartAgent v2.0 已启动")
     print(f"  地址: http://{host}:{port}")
     print(f"  Agent: {_agent.name} 已注册  |  任务调度器已启动")
     print(f"  存储: {db_status}  |  日志: ./logs/")
