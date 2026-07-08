@@ -89,11 +89,17 @@ class TaskRepository:
 
         try:
             from ..infrastructure.models import TaskModel
+            from sqlalchemy import select
+            from sqlalchemy.orm import selectinload
 
             async with self._get_async_session() as session:
-                result = await session.get(TaskModel, task_id)
-                if result:
-                    return result.to_dict()
+                stmt = select(TaskModel).where(TaskModel.id == task_id).options(
+                    selectinload(TaskModel.events)
+                )
+                result = await session.execute(stmt)
+                model = result.scalar_one_or_none()
+                if model:
+                    return model.to_dict()
         except Exception as e:
             logger.error(f"从 MySQL 加载任务失败: {e}")
         return None
@@ -113,9 +119,12 @@ class TaskRepository:
         try:
             from ..infrastructure.models import TaskModel, TaskStatusEnum
             from sqlalchemy import select
+            from sqlalchemy.orm import selectinload
 
             async with self._get_async_session() as session:
-                stmt = select(TaskModel)
+                stmt = select(TaskModel).options(
+                    selectinload(TaskModel.events)
+                )
                 if status:
                     stmt = stmt.where(TaskModel.status == status)
                 stmt = stmt.order_by(TaskModel.created_at.desc()).limit(limit)
