@@ -28,6 +28,7 @@ import uvicorn
 from src.core.agent import Agent, AgentEvent, create_agent
 from src.core.llm import LLMConfig
 from src.core.task_manager import get_task_manager, AgentProxy
+from src.core.orchestrator import ExecutionMode, patch_task_manager
 from src.tools.builtin_tools import register_all
 
 
@@ -1500,6 +1501,79 @@ async def api_publish_task(req: PublishTaskRequest):
     return {"ok": True, "task_id": task_id}
 
 
+# ============================================================
+# 多 Agent 编排 API
+# ============================================================
+
+class OrchestrateTaskRequest(BaseModel):
+    description: str
+    title: str = ""
+    mode: str = "auto"                    # single / parallel / pipeline / collaborative / auto
+    agent_names: list[str] = []           # 指定参与 Agent，空=自动选择空闲
+
+
+@app.post("/api/tasks/orchestrate")
+async def api_orchestrate_task(req: OrchestrateTaskRequest):
+    """编排执行任务 — 自动选择最佳策略并多 Agent 协作"""
+    tm = get_task_manager()
+
+    # 确保编排器已挂载
+    if not hasattr(tm, 'execute_orchestrated'):
+        patch_task_manager(tm)
+
+    result = tm.execute_orchestrated(
+        description=req.description,
+        title=req.title,
+        mode=req.mode,
+        agent_names=req.agent_names or None,
+    )
+    return {"ok": result.success, "result": result.to_dict()}
+
+
+@app.post("/api/tasks/detect-mode")
+async def api_detect_mode(req: OrchestrateTaskRequest):
+    """检测最适合任务的执行模式（不实际执行）"""
+    tm = get_task_manager()
+    if not hasattr(tm, 'detect_best_mode'):
+        patch_task_manager(tm)
+
+    detection = tm.detect_best_mode(req.description)
+    available_modes = [
+        {"value": m.value, "label": m.name, "desc": _mode_description(m)}
+        for m in ExecutionMode if m != ExecutionMode.AUTO
+    ]
+    return {
+        "ok": True,
+        "recommended": detection,
+        "available_modes": available_modes,
+    }
+
+
+def _mode_description(mode: ExecutionMode) -> str:
+    return {
+        ExecutionMode.SINGLE: "单个 Agent 执行，适合简单问答",
+        ExecutionMode.PARALLEL: "多个 Agent 同时执行，结果汇总 — 适合多角度分析、对比",
+        ExecutionMode.PIPELINE: "Agent 串行接力，前一个输出给后一个 — 适合多步骤流程",
+        ExecutionMode.COLLABORATIVE: "Agent 团队讨论互审 — 适合决策、评估、头脑风暴",
+    }.get(mode, "")
+
+
+@app.get("/api/tasks/orchestrate/modes")
+async def api_list_modes():
+    """列出所有可用编排模式"""
+    return {
+        "ok": True,
+        "modes": [
+            {
+                "value": m.value,
+                "label": m.name,
+                "desc": _mode_description(m),
+            }
+            for m in ExecutionMode
+        ],
+    }
+
+
 @app.get("/api/tasks/list")
 async def api_list_tasks(status: str = "", limit: int = 20):
     tm = get_task_manager()
@@ -1925,6 +1999,13 @@ def start(host: str = "127.0.0.1", port: int = 8080):
     proxy = AgentProxy(name=_agent.name, agent=_agent)
     tm.register_agent(proxy)
     tm.start_dispatcher()
+
+    # 挂载多 Agent 编排器
+    try:
+        patch_task_manager(tm)
+        logger.info("多 Agent 编排器已挂载")
+    except Exception as e:
+        logger.warning(f"编排器加载失败: {e}")
 
     db_status = "MySQL" if _db_initialized else "内存"
     print(f"\n  {'='*50}")

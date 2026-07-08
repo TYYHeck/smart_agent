@@ -150,6 +150,47 @@ class LoggingConfig:
 
 
 @dataclass
+class OrchestratorParallelConfig:
+    """并行执行配置"""
+    max_agents: int = 4
+    timeout_seconds: int = 600
+
+
+@dataclass
+class OrchestratorPipelineConfig:
+    """流水线配置"""
+    max_stages: int = 5
+    stage_names: list[str] = field(default_factory=lambda: [
+        "分析拆解", "方案设计", "执行实施", "验证检查", "总结输出",
+    ])
+
+
+@dataclass
+class OrchestratorCollaborativeConfig:
+    """协作讨论配置"""
+    rounds: int = 2
+    synthesizer: str = "first"
+
+
+@dataclass
+class OrchestratorAutoDetectConfig:
+    """自动模式检测配置"""
+    complexity_threshold: int = 100
+    parallel_score_min: int = 2
+    pipeline_score_min: int = 2
+
+
+@dataclass
+class OrchestratorConfig:
+    """多 Agent 编排配置"""
+    default_mode: str = "auto"
+    parallel: OrchestratorParallelConfig = field(default_factory=OrchestratorParallelConfig)
+    pipeline: OrchestratorPipelineConfig = field(default_factory=OrchestratorPipelineConfig)
+    collaborative: OrchestratorCollaborativeConfig = field(default_factory=OrchestratorCollaborativeConfig)
+    auto_detect: OrchestratorAutoDetectConfig = field(default_factory=OrchestratorAutoDetectConfig)
+
+
+@dataclass
 class MonitoringConfig:
     """监控配置"""
     enabled: bool = True
@@ -176,6 +217,7 @@ class AppConfig:
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
+    orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
 
     # ======== 可用模型列表 ========
     available_models: list[dict] = field(default_factory=lambda: [
@@ -332,6 +374,34 @@ def _parse_config(raw: dict) -> AppConfig:
             enabled=mon_raw.get("enabled", cfg.monitoring.enabled),
             metrics_path=mon_raw.get("metrics_path", cfg.monitoring.metrics_path),
             health_path=mon_raw.get("health_path", cfg.monitoring.health_path),
+        )
+
+    # Orchestrator
+    orch_raw = raw.get("orchestrator", {})
+    if orch_raw:
+        par_raw = orch_raw.get("parallel", {})
+        pipe_raw = orch_raw.get("pipeline", {})
+        collab_raw = orch_raw.get("collaborative", {})
+        auto_raw = orch_raw.get("auto_detect", {})
+        cfg.orchestrator = OrchestratorConfig(
+            default_mode=orch_raw.get("default_mode", cfg.orchestrator.default_mode),
+            parallel=OrchestratorParallelConfig(
+                max_agents=par_raw.get("max_agents", cfg.orchestrator.parallel.max_agents),
+                timeout_seconds=par_raw.get("timeout_seconds", cfg.orchestrator.parallel.timeout_seconds),
+            ),
+            pipeline=OrchestratorPipelineConfig(
+                max_stages=pipe_raw.get("max_stages", cfg.orchestrator.pipeline.max_stages),
+                stage_names=pipe_raw.get("stage_names", cfg.orchestrator.pipeline.stage_names),
+            ),
+            collaborative=OrchestratorCollaborativeConfig(
+                rounds=collab_raw.get("rounds", cfg.orchestrator.collaborative.rounds),
+                synthesizer=collab_raw.get("synthesizer", cfg.orchestrator.collaborative.synthesizer),
+            ),
+            auto_detect=OrchestratorAutoDetectConfig(
+                complexity_threshold=auto_raw.get("complexity_threshold", cfg.orchestrator.auto_detect.complexity_threshold),
+                parallel_score_min=auto_raw.get("parallel_score_min", cfg.orchestrator.auto_detect.parallel_score_min),
+                pipeline_score_min=auto_raw.get("pipeline_score_min", cfg.orchestrator.auto_detect.pipeline_score_min),
+            ),
         )
 
     return cfg

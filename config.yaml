@@ -130,6 +130,38 @@ logging:
   json_format: false               # true = JSON 格式 (适合 ELK 采集)
   mysql_errors: true               # ERROR 级别日志写入 MySQL
 
+# --- 多 Agent 编排 (企业版 v3.0) ---
+orchestrator:
+  # 默认执行模式: auto, single, parallel, pipeline, collaborative
+  default_mode: "auto"
+
+  # 并行执行配置
+  parallel:
+    max_agents: 4              # 最多同时使用几个 Agent
+    timeout_seconds: 600       # 单个 Agent 超时 (秒)
+
+  # 流水线配置
+  pipeline:
+    max_stages: 5              # 最多几个阶段
+    # 默认流水线阶段名
+    stage_names:
+      - "分析拆解"
+      - "方案设计"
+      - "执行实施"
+      - "验证检查"
+      - "总结输出"
+
+  # 协作讨论配置
+  collaborative:
+    rounds: 2                  # 讨论轮次
+    synthesizer: "first"       # 综合者: first (第一个Agent) / 或指定 Agent 名
+
+  # 自动模式检测阈值
+  auto_detect:
+    complexity_threshold: 100  # 描述超过此字数视为复杂任务
+    parallel_score_min: 2      # 并行关键词最低匹配分
+    pipeline_score_min: 2      # 流水线关键词最低匹配分
+
 # --- 监控 (企业版) ---
 monitoring:
   enabled: true

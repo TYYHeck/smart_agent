@@ -335,6 +335,11 @@ class TaskManager:
         with self._lock:
             return [a.to_dict() for a in self._agents.values()]
 
+    def list_agents_dict(self) -> dict[str, AgentProxy]:
+        """返回 Agent 字典 {name: AgentProxy} （内部用，供编排器访问）"""
+        with self._lock:
+            return dict(self._agents)
+
     # ======== 内部方法 ========
 
     def _find_task(self, task_id: str) -> Optional[Task]:
