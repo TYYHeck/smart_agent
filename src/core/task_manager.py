@@ -20,11 +20,16 @@ import threading
 import json
 import logging
 import re
+import asyncio as _asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 # ── 当前执行上下文（用于 write_file 自动关联任务）──
 _current_task_id: ContextVar[Optional[str]] = ContextVar("current_task_id", default=None)
 
 logger = logging.getLogger("smart_agent.task_manager")
+
+# 后台线程池，用于在同步上下文中执行异步 DB 写入
+_db_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="db_persist")
 
 
 # ============================================================
@@ -135,6 +140,106 @@ class TaskManager:
         self._dispatcher_thread: Optional[threading.Thread] = None
         self._dispatcher_running = False
         self._dispatch_interval = 1.0         # 调度间隔（秒）
+        self._repo = None                     # 懒加载 TaskRepository
+        self._db_enabled = False
+
+    # ======== 数据库持久化 ========
+
+    def _get_repo(self):
+        """懒加载 TaskRepository"""
+        if self._repo is None:
+            try:
+                from src.infrastructure.task_repo import get_task_repo
+                self._repo = get_task_repo()
+                self._db_enabled = self._repo.db_enabled
+            except Exception:
+                self._repo = None
+                self._db_enabled = False
+        else:
+            self._db_enabled = self._repo.db_enabled
+        return self._repo
+
+    def _run_async(self, coro):
+        """在任意上下文中安全执行异步协程（fire-and-forget 写操作）"""
+        try:
+            loop = _asyncio.get_running_loop()
+            loop.create_task(coro)
+        except RuntimeError:
+            _db_executor.submit(self._run_in_thread, coro)
+
+    @staticmethod
+    def _run_in_thread(coro):
+        """在新线程的事件循环中执行协程"""
+        loop = _asyncio.new_event_loop()
+        _asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def _persist_task(self, task: Task):
+        """将任务写入数据库（fire-and-forget）"""
+        if not self._db_enabled:
+            self._get_repo()
+        repo = self._repo
+        if repo is None or not repo.db_enabled:
+            return
+        task_dict = task.to_dict()
+        # to_dict 截断了 description/result，补全完整字段
+        task_dict["description"] = task.description
+        task_dict["result"] = task.result
+        task_dict["error"] = task.error
+        task_dict["tags"] = task.tags
+        self._run_async(repo.save_task(task_dict))
+
+    def _persist_events(self, task: Task):
+        """将任务事件批量写入数据库"""
+        if not self._db_enabled:
+            self._get_repo()
+        repo = self._repo
+        if repo is None or not repo.db_enabled:
+            return
+        for evt in task.event_log:
+            self._run_async(repo.add_event(task.id, evt.get("event", ""), evt.get("data")))
+
+    def load_history_from_db(self):
+        """启动时从数据库恢复历史任务到内存"""
+        repo = self._get_repo()
+        if repo is None or not repo.db_enabled:
+            return
+
+        async def _load():
+            tasks = await repo.list_tasks(status="", limit=100)
+            count = 0
+            with self._lock:
+                for td in tasks:
+                    tid = td.get("id", "")
+                    if self._find_task(tid) is not None:
+                        continue
+                    task = Task(
+                        id=tid,
+                        title=td.get("title", ""),
+                        description=td.get("description", ""),
+                        status=TaskStatus(td.get("status", "pending")),
+                        created_at=_parse_dt_str(td.get("created_at")) or datetime.now(),
+                        started_at=_parse_dt_str(td.get("started_at")),
+                        finished_at=_parse_dt_str(td.get("finished_at")),
+                        assigned_agent=td.get("assigned_agent"),
+                        result=td.get("result"),
+                        error=td.get("error"),
+                        priority=td.get("priority", 0),
+                        tags=td.get("tags", []),
+                    )
+                    self._history.append(task)
+                    count += 1
+            if count > 0:
+                logger.info(f"从数据库恢复了 {count} 个历史任务")
+
+        try:
+            loop = _asyncio.get_running_loop()
+            loop.create_task(_load())
+        except RuntimeError:
+            _asyncio.run(_load())
 
     # ======== 发布任务 ========
 
@@ -172,6 +277,8 @@ class TaskManager:
             self._queue = deque(
                 sorted(self._queue, key=lambda t: t.priority, reverse=True)
             )
+        # 持久化到数据库
+        self._persist_task(task)
         # 触发立即调度
         self._notify_dispatcher()
         return task.id
@@ -267,8 +374,13 @@ class TaskManager:
             if task not in self._history:
                 self._history.append(task)
 
+        # 持久化任务 + 事件到数据库
+        self._persist_task(task)
+        self._persist_events(task)
+
     def cancel_task(self, task_id: str):
         """取消任务"""
+        task = None
         with self._lock:
             task = self._find_task(task_id)
             if task and task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
@@ -276,6 +388,10 @@ class TaskManager:
                 task.finished_at = datetime.now()
                 if task not in self._history:
                     self._history.append(task)
+
+        if task:
+            self._persist_task(task)
+            self._persist_events(task)
 
     # ======== 查询 ========
 
@@ -424,6 +540,9 @@ class TaskManager:
             agent_proxy.status = "busy"
             agent_proxy.current_task_id = task.id
             self._history.append(task)  # 加入 history，确保 complete/cancel 能找到
+
+        # 持久化运行状态
+        self._persist_task(task)
 
         # ── 在锁外执行，带事件捕获 ──
         task_id = task.id
@@ -615,6 +734,17 @@ class TaskManager:
 # ============================================================
 # 全局单例
 # ============================================================
+
+def _parse_dt_str(val: Any) -> Optional[datetime]:
+    """将 ISO 字符串或 datetime 转为 datetime"""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val
+    try:
+        return datetime.fromisoformat(str(val))
+    except (ValueError, TypeError):
+        return None
 
 _task_manager: Optional[TaskManager] = None
 

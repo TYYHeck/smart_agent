@@ -1910,6 +1910,93 @@ async def api_commands():
 # Agent 管理 API
 # ============================================================
 
+_agent_persist_executor = None
+
+def _get_agent_persist_executor():
+    global _agent_persist_executor
+    if _agent_persist_executor is None:
+        from concurrent.futures import ThreadPoolExecutor
+        _agent_persist_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent_db")
+    return _agent_persist_executor
+
+async def _persist_agent_to_db(name: str, model: str, provider: str, skills: list[str], description: str):
+    """将 Agent 配置写入 MySQL agent_configs 表"""
+    if not _db_initialized:
+        return
+    import asyncio as _asyncio_for_db
+
+    async def _save():
+        from src.infrastructure.database import _session_factory
+        if _session_factory is None:
+            return
+        from src.infrastructure.models import AgentConfigModel
+        async with _session_factory() as session:
+            existing = await session.get(AgentConfigModel, name)
+            if existing:
+                existing.model = model
+                existing.provider = provider
+                existing.skills = skills
+                existing.description = description
+            else:
+                cfg = AgentConfigModel(
+                    name=name, model=model, provider=provider,
+                    skills=skills, description=description,
+                )
+                session.add(cfg)
+            await session.commit()
+
+    try:
+        await _save()
+    except Exception:
+        pass
+
+
+async def _restore_agents(tm):
+    """从数据库恢复历史 Agent 到任务管理器"""
+    from src.infrastructure.database import _session_factory
+    if _session_factory is None:
+        return
+    from src.infrastructure.models import AgentConfigModel
+    from sqlalchemy import select
+    import logging as _logging
+    _logger = _logging.getLogger("smart_agent.web")
+
+    async with _session_factory() as session:
+        result = await session.execute(select(AgentConfigModel))
+        cfgs = result.scalars().all()
+
+    count = 0
+    for cfg in cfgs:
+        if cfg.name in tm._agents:
+            continue  # 已存在，跳过
+        try:
+            from src.core.llm import LLMConfig
+            from src.tools.builtin_tools import register_all
+            config = LLMConfig(provider=cfg.provider or "deepseek", model=cfg.model or "deepseek-chat")
+            new_agent = Agent()
+            new_agent.name = cfg.name
+            skills = cfg.skills or []
+            skill_desc = f"专注于{'、'.join(skills)}" if skills else "通用"
+            new_agent.system_prompt = (
+                f"你是 {cfg.name}，一个{skill_desc}的 AI 助手。"
+                f"请用你的专业知识高效完成用户的任务。"
+            )
+            new_agent.init(config)
+            register_all(new_agent.tools)
+            if hasattr(new_agent, '_rebuild_graph'):
+                new_agent._rebuild_graph()
+            proxy = AgentProxy(
+                name=cfg.name, agent=new_agent,
+                skills=skills,
+                description=cfg.description or f"{skill_desc}型 Agent",
+            )
+            tm.register_agent(proxy)
+            count += 1
+        except Exception as e:
+            _logger.warning(f"恢复 Agent '{cfg.name}' 失败: {e}")
+    if count > 0:
+        _logger.info(f"从数据库恢复了 {count} 个历史 Agent")
+
 @app.get("/api/agents/list")
 async def api_list_agents():
     tm = get_task_manager()
@@ -1970,6 +2057,9 @@ async def api_create_agent(req: CreateAgentRequest):
     )
     tm.register_agent(proxy)
     tm.start_dispatcher()
+
+    # 持久化到数据库
+    await _persist_agent_to_db(req.name, req.model, req.provider, req.skills, req.description or "")
 
     return {"ok": True, "agent_name": req.name, "model": req.model, "skills": req.skills}
 
@@ -2213,6 +2303,12 @@ def init_agent():
             # 启用任务持久化
             from src.infrastructure.task_repo import get_task_repo
             get_task_repo().enable_db()
+
+            # 从数据库恢复历史任务
+            try:
+                get_task_manager().load_history_from_db()
+            except Exception as e:
+                logger.warning(f"历史任务恢复跳过: {e}")
         except Exception as e:
             logger.warning(f"MySQL 连接失败，使用内存模式: {e}")
     else:
@@ -2280,6 +2376,14 @@ def start(host: str = "127.0.0.1", port: int = 8080):
     proxy = AgentProxy(name=_agent.name, agent=_agent)
     tm.register_agent(proxy)
     tm.start_dispatcher()
+
+    # 从数据库恢复历史 Agent
+    if _db_initialized:
+        try:
+            import asyncio as _asyncio_recover
+            _asyncio_recover.get_event_loop().run_until_complete(_restore_agents(tm))
+        except Exception as e:
+            logger.warning(f"Agent 恢复跳过: {e}")
 
     # 挂载多 Agent 编排器
     try:
