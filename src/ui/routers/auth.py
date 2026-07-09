@@ -79,7 +79,7 @@ async def api_login(req: LoginRequest):
                     status_code=401,
                 )
 
-            token = create_access_token(user.username)
+            token = create_access_token(data={"sub": user.username, "role": user.role})
             return {
                 "ok": True,
                 "access_token": token,
