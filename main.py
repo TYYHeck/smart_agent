@@ -16,9 +16,10 @@ import warnings
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-# 屏蔽第三方库的 DeprecationWarning 刷屏 (anyio/starlette)
+# 屏蔽第三方库的 DeprecationWarning 刷屏 (anyio/starlette/asyncio)
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="anyio")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="starlette")
+warnings.filterwarnings("ignore", message=".*msg.*argument to Task\\.cancel.*", category=DeprecationWarning)
 
 if __name__ == "__main__":
     if "--web" in sys.argv:
