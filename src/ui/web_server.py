@@ -2613,7 +2613,7 @@ async def api_orchestrate_task_stream(request: Request, req: OrchestrateTaskRequ
             try:
                 event = await asyncio.wait_for(event_queue.get(), timeout=2.0)
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                if event.get("stage") in ("done", "error"):
+                if event.get("stage") in ("done", "error", "stage_orchestration_complete"):
                     break
             except asyncio.TimeoutError:
                 if await request.is_disconnected():

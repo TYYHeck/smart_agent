@@ -29,6 +29,7 @@ WorkingDirectory=/root/smart_agent
 # 环境变量
 EnvironmentFile=/root/smart_agent/.env
 Environment="PATH=/root/smart_agent/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONWARNINGS=ignore::DeprecationWarning"
 
 # 启动命令
 ExecStart=/root/smart_agent/venv/bin/python main.py --web --host 0.0.0.0 --port 8080
