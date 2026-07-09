@@ -562,14 +562,38 @@ function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'
 function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 // ==================== 文件下载 / 预览 ====================
-function downloadFile(filepath) {
+async function downloadFile(filepath) {
   const url = '/api/files/download?file=' + encodeURIComponent(filepath);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const token = localStorage.getItem('token');
+  try {
+    const resp = await fetch(url, {
+      headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: '下载失败 (' + resp.status + ')' }));
+      return alert(err.detail || '下载失败');
+    }
+    const blob = await resp.blob();
+    const contentDisposition = resp.headers.get('Content-Disposition') || '';
+    let filename = filepath.split('/').pop() || filepath.split('\\').pop() || 'download';
+    const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/);
+    if (utf8Match) {
+      filename = decodeURIComponent(utf8Match[1]);
+    } else {
+      const nameMatch = contentDisposition.match(/filename="?([^";]+)"?/);
+      if (nameMatch) filename = nameMatch[1];
+    }
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch (e) {
+    alert('下载出错: ' + e.message);
+  }
 }
 
 async function previewFile(filepath) {
@@ -584,7 +608,7 @@ async function previewFile(filepath) {
         <pre class="code-block ${langClass}"><code>${escHtml(data.content)}</code></pre>
         <p style="margin-top:8px;color:var(--muted);font-size:12px;">
           文件: ${escHtml(filepath)} &nbsp;|&nbsp; ${data.size||0} 字符
-          <a href="/api/files/download?file=${encodeURIComponent(filepath)}" class="btn btn-sm btn-outline" style="margin-left:8px;">⬇ 下载</a>
+          <a href="javascript:void(0)" onclick="downloadFile('${escAttr(filepath)}')" class="btn btn-sm btn-outline" style="margin-left:8px;">⬇ 下载</a>
         </p>
       </div>`, null, null);
     const saveBtn = $('modalSaveBtn');
@@ -1266,7 +1290,7 @@ function renderOrchResult(result, container) {
   if (result.output_files && result.output_files.length > 0) {
     filesHtml = `<div class="orch-output-files">📁 输出文件: ${result.output_files.map(f => {
       const fname = f.split('/').pop() || f.split('\\').pop() || f;
-      return `<a href="/api/files/download?file=${encodeURIComponent(f)}">${escHtml(fname)}</a>`;
+      return `<a href="javascript:void(0)" onclick="downloadFile('${escAttr(f)}')">${escHtml(fname)}</a>`;
     }).join(' ')}</div>`;
   }
 
