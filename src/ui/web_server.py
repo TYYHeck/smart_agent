@@ -168,6 +168,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .code-block { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; padding:12px 16px; overflow:auto; font-size:12px; line-height:1.6; white-space:pre; margin:0; }
 .form-group { margin-bottom:12px; }
 .form-group label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+.form-row { display:flex; gap:16px; }
 .form-input, .form-textarea, .form-select { width:100%; background:var(--card); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); font-size:13px; outline:none; font-family:inherit; }
 .form-input:focus, .form-textarea:focus, .form-select:focus { border-color:var(--primary); }
 .form-textarea { resize:vertical; min-height:60px; }
@@ -442,27 +443,9 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
   <!-- ===== 任务管理 ===== -->
   <div id="tab-tasks" class="tab-content">
     <div class="task-panel">
-      <h2>任务管理</h2>
-      <!-- 统一发布区 -->
-      <div class="publish-form">
-        <input id="taskInput" placeholder="输入任务描述..." onkeydown="if(event.key==='Enter')publishTask()">
-        <div class="combo-wrapper" id="agentComboWrapper" style="min-width:140px;">
-          <input class="combo-input" id="agentComboInput" placeholder="自动分配" autocomplete="off" style="border-radius:8px;padding:10px 28px 10px 12px;">
-          <span class="combo-arrow">▼</span><div class="combo-dropdown" id="agentComboDropdown"></div>
-        </div>
-        <!-- 执行模式切换 -->
-        <div class="mode-toggle" id="modeToggle">
-          <button class="mode-btn active" onclick="setExecMode('single',this)">👤 单 Agent</button>
-          <button class="mode-btn" onclick="setExecMode('orchestrated',this)">🤖 多 Agent 编排</button>
-        </div>
-        <select id="orchModeSelect" class="form-select" style="min-width:130px;display:none;" onchange="onOrchModeChange()">
-          <option value="auto">自动选择策略</option>
-          <option value="parallel">⚡ 并行执行</option>
-          <option value="pipeline">🔗 流水线</option>
-          <option value="collaborative">🤝 协作讨论</option>
-        </select>
-        <label class="btn btn-outline btn-sm" style="cursor:pointer;" title="上传附件">📎<input type="file" id="taskFileInput" style="display:none;" onchange="uploadTaskFile(this)" multiple></label>
-        <button onclick="publishTask()" id="publishBtn">发布任务</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h2 style="margin:0;">任务管理</h2>
+        <button class="btn btn-primary" onclick="showNewTaskModal()" style="padding:10px 24px;font-size:15px;">+ 新建任务</button>
       </div>
       <!-- 编排实时面板 -->
       <div id="orchLivePanel" style="display:none;">
@@ -682,17 +665,6 @@ function uploadChatFile(input) {
   input.value = '';
 }
 
-function uploadTaskFile(input) {
-  if (!input.files || input.files.length === 0) return;
-  uploadFiles(input.files, (data) => {
-    const taskInput = $('taskInput');
-    const existing = taskInput.value.trim();
-    const fileHint = '\n[附件: ' + data.path + ']';
-    taskInput.value = existing ? existing + fileHint : '请处理附件文件: ' + data.path;
-  });
-  input.value = '';
-}
-
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
@@ -859,11 +831,13 @@ async function switchModelById(modelId, provider) {
 
 // ---- Agent Combobox ----
 let selectedAgent = '';
+let _agentNamesCache = [];  // 缓存 Agent 名列表，供模态框使用
 function renderAgentItem(a, q) {
   const skills = a.skills&&a.skills.length ? `<span class="combo-hint">${a.skills.join(',')}</span>` : '';
   return highlightMatch(a.name, q) + ' ' + skills;
 }
 function initAgentCombo() {
+  if (!$('agentComboWrapper')) return;  // 任务页已改用模态框，跳过
   initCombo('agentComboWrapper','agentComboInput','agentComboDropdown',
     [{label:'自动分配',name:'',description:'由系统智能分配'}],
     item => { $('agentComboInput').value = item.name||'自动分配'; selectedAgent = item.name||''; },
@@ -874,13 +848,19 @@ async function refreshAgentCombo() {
   try {
     const data = await api('/api/agents/list');
     const items = [{label:'自动分配',name:'',description:'由系统智能分配'}];
-    (data.agents||[]).forEach(a => items.push({
-      label:a.name, name:a.name, skills:a.skills||[], description:a.description||'', status:a.status
-    }));
-    initCombo('agentComboWrapper','agentComboInput','agentComboDropdown', items,
-      item => { $('agentComboInput').value=item.name||'自动分配'; selectedAgent=item.name||''; },
-      (item,q) => item.name==='' ? '<b>自动分配</b> <span class="combo-hint">系统智能选择</span>' : renderAgentItem(item,q)
-    );
+    _agentNamesCache = [];
+    (data.agents||[]).forEach(a => {
+      items.push({
+        label:a.name, name:a.name, skills:a.skills||[], description:a.description||'', status:a.status
+      });
+      _agentNamesCache.push(a.name);
+    });
+    if ($('agentComboWrapper')) {
+      initCombo('agentComboWrapper','agentComboInput','agentComboDropdown', items,
+        item => { $('agentComboInput').value=item.name||'自动分配'; selectedAgent=item.name||''; },
+        (item,q) => item.name==='' ? '<b>自动分配</b> <span class="combo-hint">系统智能选择</span>' : renderAgentItem(item,q)
+      );
+    }
   } catch(e) {}
 }
 
@@ -1033,41 +1013,172 @@ async function sendMessage() {
   isStreaming=false; sendBtn.disabled=false; inputEl.focus();
 }
 
-// ==================== 任务管理 ====================
+// ==================== 任务发布模态框 ====================
 let execMode = 'single';          // 'single' | 'orchestrated'
 let orchAbortController = null;
 let orchIsExecuting = false;
+let taskModalFiles = [];  // 弹窗中已上传的文件列表 [{filename, path, size}]
 
-function setExecMode(mode, btn) {
-  execMode = mode;
-  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  const orchSelect = $('orchModeSelect');
-  orchSelect.style.display = mode === 'orchestrated' ? '' : 'none';
-  // 更新按钮文字
-  const pubBtn = $('publishBtn');
-  pubBtn.textContent = mode === 'orchestrated' ? '编排执行' : '发布任务';
-  pubBtn.style.background = mode === 'orchestrated' ? 'var(--purple)' : '';
+function showNewTaskModal() {
+  taskModalFiles = [];
+  renderTaskModalFiles();
+
+  const body = `
+    <div class="form-group">
+      <label>任务标题 <span style="color:var(--muted);font-size:11px;">（可选）</span></label>
+      <input class="form-input" id="modalTaskTitle" placeholder="给任务起个名字...">
+    </div>
+    <div class="form-group">
+      <label>任务描述 <span style="color:var(--danger);">*</span></label>
+      <textarea class="form-textarea" id="modalTaskDesc" rows="6" placeholder="详细描述你想让 Agent 做什么...&#10;&#10;例：帮我写一篇关于背包问题的讲解文档，包含动态规划思路和代码示例。"></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1;">
+        <label>优先级</label>
+        <input class="form-input" id="modalTaskPriority" type="number" min="0" max="10" value="0" style="width:80px;">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>标签 <span style="color:var(--muted);font-size:11px;">（逗号分隔）</span></label>
+        <input class="form-input" id="modalTaskTags" placeholder="如: 算法, 文档">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>目标 Agent <span style="color:var(--muted);font-size:11px;">（留空自动分配）</span></label>
+      <select class="form-select" id="modalTaskAgent" style="width:100%;">
+        <option value="">自动分配</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>执行模式</label>
+      <div class="mode-toggle" style="justify-content:flex-start;">
+        <button class="mode-btn active" id="modalModeSingle" onclick="$(this).classList.add('active');$('modalModeOrch').classList.remove('active');$('modalOrchSection').style.display='none';">👤 单 Agent</button>
+        <button class="mode-btn" id="modalModeOrch" onclick="$(this).classList.add('active');$('modalModeSingle').classList.remove('active');$('modalOrchSection').style.display='';">🤖 多 Agent 编排</button>
+      </div>
+    </div>
+    <div class="form-group" id="modalOrchSection" style="display:none;">
+      <label>编排策略</label>
+      <select class="form-select" id="modalOrchMode" style="width:100%;">
+        <option value="auto">🔍 自动选择最优策略</option>
+        <option value="parallel">⚡ 并行执行 — 多 Agent 同时处理，汇总结果</option>
+        <option value="pipeline">🔗 流水线 — Agent 串行接力，上一步输出作为下一步输入</option>
+        <option value="collaborative">🤝 协作讨论 — 团队讨论，互审达成共识</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>📎 附件 <span style="color:var(--muted);font-size:11px;">（可选）</span></label>
+      <div id="taskModalFileList" style="margin-bottom:8px;"></div>
+      <label class="btn btn-outline" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
+        📎 选择文件 <input type="file" id="taskModalFileInput" style="display:none;" onchange="uploadTaskModalFile(this)" multiple>
+      </label>
+    </div>`;
+
+  openModal('新建任务', body, submitNewTask, '发布任务');
+  $('modalContent').classList.add('wide');
+
+  // 填充 Agent 下拉
+  populateModalAgentSelect();
 }
 
-function onOrchModeChange() {}  // placeholder, hint 已集成到模式徽章
+async function populateModalAgentSelect() {
+  const sel = $('modalTaskAgent');
+  if (!sel) return;
+  // 缓存为空时先刷新
+  if (_agentNamesCache.length === 0) {
+    try {
+      const data = await api('/api/agents/list');
+      _agentNamesCache = (data.agents || []).map(a => a.name);
+    } catch(e) {}
+  }
+  // 保留"自动分配"选项，追加已注册 Agent
+  sel.innerHTML = '<option value="">自动分配</option>';
+  _agentNamesCache.forEach(name => {
+    sel.innerHTML += `<option value="${escHtml(name)}">${escHtml(name)}</option>`;
+  });
+}
 
-async function publishTask() {
-  const input = $('taskInput'), desc = input.value.trim();
-  if (!desc) return;
+function getRegisteredAgentNames() {
+  return _agentNamesCache.length > 0 ? _agentNamesCache : [];
+}
+
+function uploadTaskModalFile(input) {
+  if (!input.files || input.files.length === 0) return;
+  uploadFiles(input.files, (data) => {
+    taskModalFiles.push(data);
+    renderTaskModalFiles();
+  });
+  input.value = '';
+}
+
+function removeTaskModalFile(index) {
+  taskModalFiles.splice(index, 1);
+  renderTaskModalFiles();
+}
+
+function renderTaskModalFiles() {
+  const el = $('taskModalFileList');
+  if (!el) return;
+  if (taskModalFiles.length === 0) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:4px 0;">尚未选择文件</div>';
+    return;
+  }
+  el.innerHTML = taskModalFiles.map((f, i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 8px;background:var(--surface);border-radius:6px;margin-bottom:4px;font-size:13px;">
+      <span>📎</span>
+      <span style="flex:1;">${escHtml(f.filename)}</span>
+      <span style="color:var(--muted);font-size:11px;">${formatSize(f.size)}</span>
+      <button class="btn btn-sm btn-danger" onclick="removeTaskModalFile(${i})" style="padding:2px 6px;font-size:11px;">✕</button>
+    </div>`).join('');
+}
+
+function getModalExecMode() {
+  return $('modalModeOrch').classList.contains('active') ? 'orchestrated' : 'single';
+}
+
+function getModalOrchMode() {
+  return ($('modalOrchMode') && $('modalOrchMode').value) || 'auto';
+}
+
+async function submitNewTask() {
+  const desc = ($('modalTaskDesc')?.value || '').trim();
+  if (!desc) { alert('请输入任务描述'); return; }
   if (orchIsExecuting) return;
 
-  if (execMode === 'orchestrated') {
-    await executeOrchestrated(desc);
+  const title = ($('modalTaskTitle')?.value || '').trim();
+  const priority = parseInt($('modalTaskPriority')?.value) || 0;
+  const tags = ($('modalTaskTags')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const targetAgent = ($('modalTaskAgent')?.value || '').trim();
+  const mode = getModalExecMode();
+
+  // 拼接附件
+  let fullDesc = desc;
+  if (taskModalFiles.length > 0) {
+    fullDesc += '\n\n[用户上传的附件: ' + taskModalFiles.map(f => f.path).join(', ') + ']';
+  }
+
+  closeModal();
+
+  if (mode === 'orchestrated') {
+    const orchMode = getModalOrchMode();
+    // 临时设置选中模式以便 executeOrchestrated 可用
+    execMode = 'orchestrated';
+    await executeOrchestrated(fullDesc, title, orchMode);
   } else {
     try {
       await api('/api/tasks/publish', {
         method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({description:desc,target_agent:selectedAgent})
+        body:JSON.stringify({
+          description: fullDesc,
+          title: title || desc.slice(0, 50),
+          priority: priority,
+          tags: tags,
+          target_agent: targetAgent
+        })
       });
-      input.value=''; refreshTasks('');
+      refreshTasks('');
     } catch(e) { console.error(e); }
   }
+
+  taskModalFiles = [];
 }
 
 async function filterTasks(status, btn) {
@@ -1173,11 +1284,10 @@ async function deleteTask(taskId) {
 
 // ==================== 多 Agent 编排执行 ====================
 
-async function executeOrchestrated(desc) {
+async function executeOrchestrated(desc, title, orchMode) {
   orchIsExecuting = true;
-  const pubBtn = $('publishBtn');
-  pubBtn.disabled = true;
-  pubBtn.textContent = '执行中...';
+  title = title || desc.slice(0, 50);
+  orchMode = orchMode || 'auto';
 
   // 显示实时面板
   const livePanel = $('orchLivePanel');
@@ -1205,11 +1315,10 @@ async function executeOrchestrated(desc) {
   orchAbortController = new AbortController();
 
   try {
-    const mode = $('orchModeSelect').value;
     const resp = await fetch('/api/tasks/orchestrate/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...apiHeaders() },
-      body: JSON.stringify({ description: desc, title: desc.slice(0, 50), mode: mode, agent_names: [] }),
+      body: JSON.stringify({ description: desc, title: title, mode: orchMode, agent_names: [] }),
       signal: orchAbortController.signal
     });
 
@@ -1250,10 +1359,7 @@ async function executeOrchestrated(desc) {
   }
 
   orchIsExecuting = false;
-  pubBtn.disabled = false;
-  pubBtn.textContent = '编排执行';
   orchAbortController = null;
-  $('taskInput').value = '';
   refreshTasks('');
 }
 
