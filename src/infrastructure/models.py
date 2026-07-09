@@ -150,7 +150,7 @@ class AgentConfigModel(Base):
     provider = Column(String(32), default="deepseek")
     skills = Column(JSON, default=list)
     description = Column(String(512), default="")
-    system_prompt = Column(Text, default="")
+    system_prompt = Column(Text, nullable=True)
     max_iterations = Column(Integer, default=15)
     enable_planning = Column(Boolean, default=False)
     enable_rag = Column(Boolean, default=True)

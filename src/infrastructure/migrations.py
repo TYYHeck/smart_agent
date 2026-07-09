@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS agent_configs (
     provider VARCHAR(32) DEFAULT 'deepseek',
     skills JSON,
     description VARCHAR(512) DEFAULT '',
-    system_prompt TEXT DEFAULT '',
+    system_prompt TEXT,
     max_iterations INT DEFAULT 15,
     enable_planning BOOLEAN DEFAULT FALSE,
     enable_rag BOOLEAN DEFAULT TRUE,
