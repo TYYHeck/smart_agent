@@ -57,6 +57,7 @@ CHAT_PAGE = r"""<!DOCTYPE html>
   --error: #f85149; --purple: #a371f7; --teal: #39d353;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
+html, body { margin:0; padding:0; }
 body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; }
 /* 侧边栏 */
 .sidebar { width:260px; background:var(--sidebar); display:flex; flex-direction:column; border-right:1px solid var(--border); flex-shrink:0; overflow-y:auto; }
@@ -335,7 +336,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 /* 响应式 */
 @media(max-width:768px) { .sidebar { width:200px; } .dash-grid { grid-template-columns:1fr; } .stat-cards { grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); } }
 /* 登录页 */
-.login-page { display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--bg); }
+.login-page { flex:1; display:flex; align-items:center; justify-content:center; background:var(--bg); }
 .login-card { background:var(--sidebar); border:1px solid var(--border); border-radius:12px; padding:40px; width:400px; max-width:90vw; box-shadow:0 4px 24px rgba(0,0,0,.3); }
 .login-card h1 { color:var(--text-bright); font-size:24px; margin:0 0 8px; text-align:center; }
 .login-card h1 span { color:var(--primary); }
