@@ -89,51 +89,84 @@ async def api_orchestrate_task_stream(
     if agent.name not in list(tm._agents.keys()):
         tm.register_agent(AgentProxy(name=agent.name, agent=agent))
 
+    # 确保 patch_task_manager 已调用（懒检查）
+    if not hasattr(tm, 'execute_orchestrated'):
+        patch_task_manager(tm)
+
+    # 注入主事件循环引用，确保跨线程 DB 写入正常
+    main_loop = asyncio.get_event_loop()
+    tm._main_loop = main_loop
+
+    # 先做模式检测（同步，不在线程池中）
+    if req.mode == "auto" and hasattr(tm, 'detect_best_mode'):
+        detection = tm.detect_best_mode(req.description)
+        detected_mode = detection.get("mode", "single")
+        detected_reason = detection.get("reason", "")
+    else:
+        detected_mode = req.mode
+        detected_reason = "手动指定"
+
     async def generate():
         progress_queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_event_loop()  # ← 在 async 上下文中获取（关键！闭包捕获）
 
         def _on_progress(stage: str, info: dict):
+            import logging as _log
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        progress_queue.put({"stage": stage, **info}),
-                        loop,
-                    )
-            except Exception:
-                pass
+                safe_info = {}
+                for k, v in info.items():
+                    if isinstance(v, (str, int, float, bool, list, dict, type(None))):
+                        safe_info[k] = v if not isinstance(v, str) or len(str(v)) <= 500 else str(v)[:500]
+                    else:
+                        safe_info[k] = str(v)[:500]
+                asyncio.run_coroutine_threadsafe(
+                    progress_queue.put({"stage": stage, **safe_info}), loop
+                )
+            except Exception as e:
+                _log.getLogger("smart_agent.web").warning(
+                    f"进度回调失败 stage={stage}: {e}", exc_info=True
+                )
 
         def _run():
             try:
                 result = tm.execute_orchestrated(
                     description=req.description,
                     title=req.title,
-                    mode=req.mode,
+                    mode=detected_mode,
                     agent_names=req.agent_names,
                     on_progress=_on_progress,
                 )
                 asyncio.run_coroutine_threadsafe(
-                    progress_queue.put({"type": "done", "result": result.to_dict()}),
-                    asyncio.get_event_loop(),
+                    progress_queue.put({"stage": "done", "result": result.to_dict()}), loop
                 )
             except Exception as e:
+                import traceback
                 asyncio.run_coroutine_threadsafe(
-                    progress_queue.put({"type": "error", "content": str(e)}),
-                    asyncio.get_event_loop(),
+                    progress_queue.put({
+                        "stage": "error",
+                        "error": str(e),
+                        "traceback": traceback.format_exc()[:500],
+                    }), loop
                 )
 
         _orch_executor.submit(_run)
+
+        # ── 发送初始事件（前端靠这些更新"正在启动"状态）──
+        yield f"data: {json.dumps({'stage': 'start', 'mode': detected_mode, 'mode_reason': detected_reason, 'description': req.description[:200]}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'stage': 'mode_detected', 'mode': detected_mode, 'reason': detected_reason}, ensure_ascii=False)}\n\n"
 
         while True:
             if await request.is_disconnected():
                 break
             try:
-                event = await asyncio.wait_for(progress_queue.get(), timeout=0.5)
+                event = await asyncio.wait_for(progress_queue.get(), timeout=2.0)
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                if event.get("type") in ("done", "error"):
+                if event.get("stage") in ("done", "error", "orchestration_complete"):
                     break
             except asyncio.TimeoutError:
-                continue
+                if await request.is_disconnected():
+                    break
+                yield f"data: {json.dumps({'stage': 'heartbeat'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         generate(),
