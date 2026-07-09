@@ -67,11 +67,23 @@ CREATE TABLE IF NOT EXISTS agent_configs (
     provider VARCHAR(32) DEFAULT 'deepseek',
     skills JSON,
     description VARCHAR(512) DEFAULT '',
+    system_prompt TEXT DEFAULT '',
+    max_iterations INT DEFAULT 15,
+    enable_planning BOOLEAN DEFAULT FALSE,
+    enable_rag BOOLEAN DEFAULT TRUE,
+    enable_reflection BOOLEAN DEFAULT FALSE,
     status VARCHAR(16) DEFAULT 'idle',
     current_task_id VARCHAR(32) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Agent 配置表 v2.0 字段补全（如果表已存在但缺少新列）
+ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS system_prompt TEXT DEFAULT '' AFTER description;
+ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS max_iterations INT DEFAULT 15 AFTER system_prompt;
+ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS enable_planning BOOLEAN DEFAULT FALSE AFTER max_iterations;
+ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS enable_rag BOOLEAN DEFAULT TRUE AFTER enable_planning;
+ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS enable_reflection BOOLEAN DEFAULT FALSE AFTER enable_rag;
 
 -- 系统日志表
 CREATE TABLE IF NOT EXISTS system_logs (
