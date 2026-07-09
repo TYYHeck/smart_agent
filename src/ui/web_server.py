@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 import uvicorn
 
+from src.auth.dependencies import get_current_user, get_optional_user, get_current_admin
 from src.core.agent import Agent, AgentEvent, create_agent
 from src.core.llm import LLMConfig
 from src.core.task_manager import get_task_manager, AgentProxy
@@ -1690,8 +1691,8 @@ async def health_check():
 # ============================================================
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=2, max_length=64, description="用户名")
+    password: str = Field(..., min_length=4, description="密码")
 
     @field_validator("username")
     @classmethod
@@ -1712,9 +1713,9 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    username: str
-    password: str
-    email: str = ""
+    username: str = Field(..., min_length=2, max_length=64, description="用户名")
+    password: str = Field(..., min_length=6, max_length=128, description="密码")
+    email: str = Field("", description="邮箱（可选）")
 
     @field_validator("username")
     @classmethod
@@ -1822,55 +1823,9 @@ async def api_register(req: RegisterRequest):
 
 
 @app.get("/api/auth/me")
-async def api_me(request: Request):
+async def api_me(current_user = Depends(get_current_user)):
     """获取当前用户信息（需要 Bearer Token）"""
-    from src.auth import decode_access_token
-    from sqlalchemy import select
-
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return JSONResponse(
-            {"ok": False, "error": "请在 Header 中提供 Bearer Token"},
-            status_code=401,
-        )
-
-    token = auth_header[7:]
-    payload = decode_access_token(token)
-    if payload is None:
-        return JSONResponse(
-            {"ok": False, "error": "令牌无效或已过期"},
-            status_code=401,
-        )
-
-    username = payload.get("sub", "")
-    if not username:
-        return JSONResponse({"ok": False, "error": "令牌内容无效"}, status_code=401)
-
-    try:
-        from src.infrastructure.database import get_session
-        from src.infrastructure.models import UserModel
-
-        async for session in get_session():
-            result = await session.execute(
-                select(UserModel).where(
-                    UserModel.username == username,
-                    UserModel.is_active == True,
-                )
-            )
-            user = result.scalar_one_or_none()
-
-            if user is None:
-                return JSONResponse(
-                    {"ok": False, "error": "用户不存在或已被禁用"},
-                    status_code=401,
-                )
-
-            return {"ok": True, "user": user.to_dict()}
-    except ImportError:
-        return JSONResponse(
-            {"ok": False, "error": "认证系统未启用"},
-            status_code=503,
-        )
+    return {"ok": True, "user": current_user.to_dict()}
 
 
 # ============================================================
@@ -1892,7 +1847,7 @@ async def api_metrics():
 # ============================================================
 
 @app.get("/api/system/info")
-async def api_system_info():
+async def api_system_info(current_user = Depends(get_current_user)):
     """系统信息（运行状态、数据库状态等）"""
     import platform
     import psutil
@@ -1941,7 +1896,7 @@ async def index():
 # ============================================================
 
 @app.get("/api/config")
-async def api_config():
+async def api_config(current_user = Depends(get_current_user)):
     agent = get_agent()
     return {
         "model": agent.llm.config.model if agent.llm else "N/A",
@@ -1956,7 +1911,7 @@ async def api_config():
 
 
 @app.get("/api/models")
-async def api_models():
+async def api_models(current_user = Depends(get_current_user)):
     agent = get_agent()
     return {
         "current": agent.llm.config.model if agent.llm else "N/A",
@@ -1965,13 +1920,13 @@ async def api_models():
 
 
 class SwitchModelRequest(BaseModel):
-    model: str
-    provider: str | None = None
-    base_url: str | None = None
+    model: str = Field(..., description="模型 ID")
+    provider: str | None = Field(None, description="提供商（可选）")
+    base_url: str | None = Field(None, description="自定义 API 地址（可选）")
 
 
 @app.post("/api/switch_model")
-async def api_switch_model(req: SwitchModelRequest):
+async def api_switch_model(req: SwitchModelRequest, current_user = Depends(get_current_user)):
     agent = get_agent()
     agent.switch_model(model=req.model, provider=req.provider, base_url=req.base_url)
     return {
@@ -1982,11 +1937,11 @@ async def api_switch_model(req: SwitchModelRequest):
 
 
 class ToggleModeRequest(BaseModel):
-    mode: str
+    mode: str = Field(..., description="模式名称: planning / rag / reflection")
 
 
 @app.post("/api/toggle_mode")
-async def api_toggle_mode(req: ToggleModeRequest):
+async def api_toggle_mode(req: ToggleModeRequest, current_user = Depends(get_current_user)):
     agent = get_agent()
     if req.mode == "planning":
         agent.enable_planning = not agent.enable_planning
@@ -2009,11 +1964,11 @@ async def api_toggle_mode(req: ToggleModeRequest):
 # ============================================================
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, description="用户消息内容")
 
 
 @app.post("/api/chat")
-async def api_chat(req: ChatRequest):
+async def api_chat(req: ChatRequest, current_user = Depends(get_current_user)):
     agent = get_agent()
 
     async def generate():
@@ -2035,15 +1990,15 @@ async def api_chat(req: ChatRequest):
 # ============================================================
 
 class PublishTaskRequest(BaseModel):
-    description: str
-    title: str = ""
-    priority: int = 0
-    tags: list[str] = []
-    target_agent: str = ""
+    description: str = Field(..., min_length=1, description="任务描述")
+    title: str = Field("", description="任务标题（可选，不填则截取描述前50字）")
+    priority: int = Field(0, ge=0, le=10, description="优先级 0-10")
+    tags: list[str] = Field(default_factory=list, description="标签列表")
+    target_agent: str = Field("", description="指定 Agent 名称（空=自动分配）")
 
 
 @app.post("/api/tasks/publish")
-async def api_publish_task(req: PublishTaskRequest):
+async def api_publish_task(req: PublishTaskRequest, current_user = Depends(get_current_user)):
     tm = get_task_manager()
     task_id = tm.publish(
         description=req.description,
@@ -2060,14 +2015,15 @@ async def api_publish_task(req: PublishTaskRequest):
 # ============================================================
 
 class OrchestrateTaskRequest(BaseModel):
-    description: str
-    title: str = ""
-    mode: str = "auto"                    # single / parallel / pipeline / collaborative / auto
+    description: str = Field(..., min_length=1, description="任务描述")
+    title: str = Field("", description="任务标题")
+    mode: str = Field("auto", description="执行模式: single / parallel / pipeline / collaborative / auto")
+    agent_names: list[str] | None = Field(None, description="指定 Agent 列表（可选）")
     agent_names: list[str] = []           # 指定参与 Agent，空=自动选择空闲
 
 
 @app.post("/api/tasks/orchestrate")
-async def api_orchestrate_task(req: OrchestrateTaskRequest):
+async def api_orchestrate_task(req: OrchestrateTaskRequest, current_user = Depends(get_current_user)):
     """编排执行任务 — 自动选择最佳策略并多 Agent 协作"""
     tm = get_task_manager()
 
@@ -2089,7 +2045,7 @@ async def api_orchestrate_task(req: OrchestrateTaskRequest):
 # ============================================================
 
 @app.post("/api/tasks/orchestrate/stream")
-async def api_orchestrate_task_stream(request: Request, req: OrchestrateTaskRequest):
+async def api_orchestrate_task_stream(request: Request, req: OrchestrateTaskRequest, current_user = Depends(get_current_user)):
     """
     编排执行任务 — SSE 实时流式推送多 Agent 协作全过程
 
@@ -2200,7 +2156,7 @@ async def api_orchestrate_task_stream(request: Request, req: OrchestrateTaskRequ
 
 
 @app.post("/api/tasks/detect-mode")
-async def api_detect_mode(req: OrchestrateTaskRequest):
+async def api_detect_mode(req: OrchestrateTaskRequest, current_user = Depends(get_current_user)):
     """检测最适合任务的执行模式（不实际执行）"""
     tm = get_task_manager()
     if not hasattr(tm, 'detect_best_mode'):
@@ -2228,7 +2184,7 @@ def _mode_description(mode: ExecutionMode) -> str:
 
 
 @app.get("/api/tasks/orchestrate/modes")
-async def api_list_modes():
+async def api_list_modes(current_user = Depends(get_current_user)):
     """列出所有可用编排模式"""
     return {
         "ok": True,
@@ -2330,7 +2286,7 @@ def _format_file_size(size: int) -> str:
 
 
 @app.get("/api/files/list")
-async def api_list_files(task_id: str = ""):
+async def api_list_files(task_id: str = "", current_user = Depends(get_current_user)):
     """
     列出输出文件
     - task_id=xxx: 只列出该任务生成的文件
@@ -2341,7 +2297,7 @@ async def api_list_files(task_id: str = ""):
 
 
 @app.get("/api/files/download")
-async def api_download_file(file: str):
+async def api_download_file(file: str, current_user = Depends(get_current_user)):
     """
     下载指定的输出文件
     - file: 文件路径（相对于 output_dir，或绝对路径）
@@ -2376,7 +2332,7 @@ async def api_download_file(file: str):
 
 
 @app.get("/api/files/preview")
-async def api_preview_file(file: str):
+async def api_preview_file(file: str, current_user = Depends(get_current_user)):
     """
     预览文本文件（返回内容，用于前端嵌入显示）
     """
@@ -2415,14 +2371,14 @@ async def api_preview_file(file: str):
 
 
 @app.get("/api/tasks/list")
-async def api_list_tasks(status: str = "", limit: int = 20):
+async def api_list_tasks(status: str = "", limit: int = 20, current_user = Depends(get_current_user)):
     tm = get_task_manager()
     tasks = tm.list_tasks(status=status, limit=limit)
     return {"ok": True, "tasks": tasks, "queue": tm.queue_status()}
 
 
 @app.get("/api/tasks/{task_id}")
-async def api_get_task(task_id: str):
+async def api_get_task(task_id: str, current_user = Depends(get_current_user)):
     tm = get_task_manager()
     task = tm.get_task(task_id)
     if task is None:
@@ -2431,14 +2387,56 @@ async def api_get_task(task_id: str):
 
 
 @app.post("/api/tasks/{task_id}/cancel")
-async def api_cancel_task(task_id: str):
+async def api_cancel_task(task_id: str, current_user = Depends(get_current_user)):
     tm = get_task_manager()
     tm.cancel_task(task_id)
     return {"ok": True}
 
 
+@app.get("/api/tasks/{task_id}/watch")
+async def api_watch_task(task_id: str, request: Request, current_user = Depends(get_current_user)):
+    """SSE 实时监听任务状态变更（编排进度可视化）"""
+    tm = get_task_manager()
+    task = tm.get_task(task_id)
+    if task is None:
+        return JSONResponse({"ok": False, "error": "任务未找到"}, status_code=404)
+
+    async def generate():
+        last_event_count = 0
+        current_task = tm.get_task(task_id) or {}
+        yield f"data: {json.dumps({'type': 'status', 'task': current_task}, ensure_ascii=False)}\n\n"
+
+        while True:
+            if await request.is_disconnected():
+                break
+            await asyncio.sleep(1)
+            current_task = tm.get_task(task_id)
+            if current_task is None:
+                yield f"data: {json.dumps({'type': 'gone', 'task_id': task_id}, ensure_ascii=False)}\n\n"
+                break
+
+            status = current_task.get("status", "")
+            if status in ("completed", "failed", "cancelled"):
+                yield f"data: {json.dumps({'type': 'done', 'task': current_task}, ensure_ascii=False)}\n\n"
+                break
+
+            event_log = current_task.get("event_log", [])
+            new_count = len(event_log)
+            if new_count > last_event_count:
+                new_events = event_log[last_event_count:]
+                for evt in new_events:
+                    yield f"data: {json.dumps({'type': 'event', 'data': evt}, ensure_ascii=False)}\n\n"
+                last_event_count = new_count
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/tasks/queue/status")
-async def api_queue_status():
+async def api_queue_status(current_user = Depends(get_current_user)):
     tm = get_task_manager()
     return {"ok": True, **tm.queue_status()}
 
@@ -2581,14 +2579,14 @@ async def _restore_agents(tm):
         pass
 
 @app.get("/api/agents/list")
-async def api_list_agents():
+async def api_list_agents(current_user = Depends(get_current_user)):
     tm = get_task_manager()
     agents = tm.list_agents()
     return {"ok": True, "agents": agents}
 
 
 @app.post("/api/agents/register")
-async def api_register_agent():
+async def api_register_agent(current_user = Depends(get_current_user)):
     agent = get_agent()
     tm = get_task_manager()
     proxy = AgentProxy(name=agent.name, agent=agent)
@@ -2598,7 +2596,7 @@ async def api_register_agent():
 
 
 @app.post("/api/agents/unregister")
-async def api_unregister_agent():
+async def api_unregister_agent(current_user = Depends(get_current_user)):
     agent = get_agent()
     tm = get_task_manager()
     tm.unregister_agent(agent.name)
@@ -2606,15 +2604,15 @@ async def api_unregister_agent():
 
 
 class CreateAgentRequest(BaseModel):
-    name: str = Field(..., min_length=1, description="Agent 名称不能为空")
-    model: str = "deepseek-chat"
-    provider: str = "deepseek"
-    skills: list[str] = []
-    description: str = ""
+    name: str = Field(..., min_length=1, description="Agent 名称（不能为空）")
+    model: str = Field("deepseek-chat", description="LLM 模型 ID")
+    provider: str = Field("deepseek", description="LLM 提供商")
+    skills: list[str] = Field(default_factory=list, description="技能标签列表")
+    description: str = Field("", description="Agent 描述")
 
 
 @app.post("/api/agents/create")
-async def api_create_agent(req: CreateAgentRequest):
+async def api_create_agent(req: CreateAgentRequest, current_user = Depends(get_current_user)):
     from src.core.llm import LLMConfig
     from src.tools.builtin_tools import register_all
 
@@ -2655,7 +2653,7 @@ async def api_create_agent(req: CreateAgentRequest):
 # ============================================================
 
 @app.get("/api/dashboard/stats")
-async def api_dashboard_stats():
+async def api_dashboard_stats(current_user = Depends(get_current_user)):
     tm = get_task_manager()
     agent = get_agent()
     qs = tm.queue_status()
@@ -2697,15 +2695,15 @@ async def api_dashboard_stats():
 # ============================================================
 
 class UpdateTaskRequest(BaseModel):
-    description: str | None = None
-    title: str | None = None
-    priority: int | None = None
+    description: str | None = Field(None, description="新任务描述（可选）")
+    title: str | None = Field(None, description="新标题（可选）")
+    priority: int | None = Field(None, ge=0, le=10, description="新优先级（可选）")
     tags: list[str] | None = None
     target_agent: str | None = None
 
 
 @app.post("/api/tasks/{task_id}/update")
-async def api_update_task(task_id: str, req: UpdateTaskRequest):
+async def api_update_task(task_id: str, req: UpdateTaskRequest, current_user = Depends(get_current_user)):
     tm = get_task_manager()
     task_dict = tm.get_task(task_id)
     if task_dict is None:
@@ -2742,12 +2740,12 @@ async def api_update_task(task_id: str, req: UpdateTaskRequest):
 # ============================================================
 
 class UpdateAgentRequest(BaseModel):
-    skills: list[str] | None = None
-    description: str | None = None
+    skills: list[str] | None = Field(None, description="更新技能标签列表（可选）")
+    description: str | None = Field(None, description="更新描述（可选）")
 
 
 @app.post("/api/agents/{name}/update")
-async def api_update_agent(name: str, req: UpdateAgentRequest):
+async def api_update_agent(name: str, req: UpdateAgentRequest, current_user = Depends(get_current_user)):
     tm = get_task_manager()
     proxy = tm._agents.get(name)
     if proxy is None:
@@ -2762,7 +2760,7 @@ async def api_update_agent(name: str, req: UpdateAgentRequest):
 
 
 @app.delete("/api/agents/{name}")
-async def api_delete_agent(name: str):
+async def api_delete_agent(name: str, current_user = Depends(get_current_user)):
     tm = get_task_manager()
     if name not in tm._agents:
         return JSONResponse({"ok": False, "error": "Agent 未找到"}, status_code=404)
@@ -2772,7 +2770,7 @@ async def api_delete_agent(name: str):
 
 
 @app.post("/api/agents/cleanup")
-async def api_cleanup_agents():
+async def api_cleanup_agents(current_user = Depends(get_current_user)):
     """清理空名字等无效 Agent (内存+数据库)"""
     tm = get_task_manager()
     removed = []
@@ -2819,7 +2817,7 @@ async def _do_delete_agent(name: str, tm):
 # ============================================================
 
 @app.get("/api/config/full")
-async def api_config_full():
+async def api_config_full(current_user = Depends(get_current_user)):
     import yaml
 
     config_path = os.path.join(
@@ -2835,12 +2833,12 @@ async def api_config_full():
 
 
 class UpdateConfigRequest(BaseModel):
-    section: str
-    data: dict
+    section: str = Field(..., description="配置节名称（如 llm, agent, database）")
+    data: dict = Field(..., description="要更新的配置键值对")
 
 
 @app.post("/api/config/update")
-async def api_config_update(req: UpdateConfigRequest):
+async def api_config_update(req: UpdateConfigRequest, current_user = Depends(get_current_user)):
     import yaml
 
     config_path = os.path.join(

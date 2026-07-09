@@ -42,6 +42,7 @@ python-dotenv>=1.0.0          # 环境变量管理
 sqlalchemy[asyncio]>=2.0.0    # ORM + 异步支持
 aiomysql>=0.2.0               # MySQL 异步驱动
 cryptography>=41.0.0          # MySQL 认证加密
+alembic>=1.13.0               # 数据库迁移工具
 
 # === 认证 (企业版) ===
 python-jose[cryptography]>=3.3.0  # JWT 令牌生成/验证
@@ -49,6 +50,7 @@ passlib[bcrypt]>=1.7.4            # 密码哈希
 
 # === 系统监控 (企业版) ===
 psutil>=5.9.0                 # 系统资源监控
+prometheus_client>=0.20.0     # Prometheus 官方指标库
 
 # === 测试 ===
 pytest>=8.0.0                  # 测试框架

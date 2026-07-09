@@ -154,7 +154,8 @@ class TaskManager:
                 from src.infrastructure.task_repo import get_task_repo
                 self._repo = get_task_repo()
                 self._db_enabled = self._repo.db_enabled
-            except Exception:
+            except Exception as e:
+                logger.warning(f"TaskRepository 初始化失败: {e}")
                 self._repo = None
                 self._db_enabled = False
         else:
@@ -515,8 +516,8 @@ class TaskManager:
         while self._dispatcher_running:
             try:
                 self._dispatch_once()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"调度循环异常: {e}", exc_info=True)
             time.sleep(self._dispatch_interval)
 
     def _dispatch_once(self):
@@ -598,8 +599,8 @@ class TaskManager:
             if original_on_event:
                 try:
                     original_on_event(event, data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"任务事件回调失败: {e}")
 
         # ── 设置当前任务上下文（用于 write_file 自动关联文件）──
         _current_task_id.set(task.id)

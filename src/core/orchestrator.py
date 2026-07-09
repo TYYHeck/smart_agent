@@ -338,8 +338,8 @@ class Orchestrator:
             if original_on_event:
                 try:
                     original_on_event(event, data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"编排事件回调失败: {e}")
 
         try:
             agent_proxy.agent.on_event = event_logger
@@ -347,6 +347,7 @@ class Orchestrator:
             agent_proxy.agent.on_event = original_on_event
             return output or ""
         except Exception:
+            logger.warning(f"Agent.run 执行异常，恢复 on_event: {agent_proxy.name}", exc_info=True)
             agent_proxy.agent.on_event = original_on_event
             raise
 
@@ -760,8 +761,8 @@ class Orchestrator:
         if callback:
             try:
                 callback(stage, info)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"进度回调异常: {e}")
 
 
 # ============================================================

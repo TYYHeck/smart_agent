@@ -798,8 +798,8 @@ class Agent:
                 kb_results = self.knowledge.search_formatted(task)
                 if kb_results:
                     rag_context = kb_results
-            except Exception:
-                pass
+            except Exception as e:
+                self._log(f"[RAG] 流式知识库检索失败: {e}")
 
         self.state = AgentState.THINKING
         self.memory.short.add_user(task)
@@ -969,7 +969,8 @@ class Agent:
                 for s in steps:
                     self._log(f"   → {s}")
             return steps
-        except Exception:
+        except Exception as e:
+            self._log(f"[Plan] 计划生成失败: {e}")
             return []
 
     # ======== 反思模式 ========
@@ -996,7 +997,8 @@ class Agent:
             else:
                 self._log("[Reflect] 发现改进空间，已更新答案")
                 return response.content
-        except Exception:
+        except Exception as e:
+            self._log(f"[Reflect] 反思检查失败: {e}")
             return answer
 
     # ======== 强制收束 ========
@@ -1017,7 +1019,8 @@ class Agent:
         try:
             response = self.llm.chat(conclude_prompt)
             return response.content
-        except Exception:
+        except Exception as e:
+            self._log(f"[Conclude] 强制总结失败: {e}")
             return "抱歉，任务处理超时。请尝试简化问题重试。"
 
 

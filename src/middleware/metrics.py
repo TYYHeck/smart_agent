@@ -2,29 +2,45 @@
 """
 Prometheus 指标中间件 —— HTTP 请求计数、延迟、错误率
 
-暴露 /metrics 端点供 Prometheus 抓取。
+基于 prometheus_client 官方库，暴露 /metrics 端点供 Prometheus 抓取。
 """
 
 from __future__ import annotations
 import time
+import re
 from typing import Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, REGISTRY, CollectorRegistry
 
-# Prometheus 指标存储（纯内存，不引入 prometheus_client 依赖）
-# 生产环境建议替换为 prometheus_client 官方库
+# ── 使用独立 Registry，避免与其他库冲突 ──
+_registry = CollectorRegistry(auto_describe=True)
 
-_metrics: dict[str, dict] = {
-    "http_requests_total": {},       # {method_path_status: count}
-    "http_request_duration_seconds": {},  # {method_path: [durations]}
-    "http_requests_in_flight": 0,
-}
+# ── 指标定义 ──
+http_requests_total = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["method", "endpoint", "status_code"],
+    registry=_registry,
+)
 
-# 路径归一化：把 /api/tasks/abc123 → /api/tasks/{id}
-import re
+http_request_duration_seconds = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request duration in seconds",
+    ["method", "endpoint"],
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+    registry=_registry,
+)
 
+http_requests_in_flight = Gauge(
+    "http_requests_in_flight",
+    "Currently in-flight HTTP requests",
+    registry=_registry,
+)
+
+# ── 路径归一化：把 /api/tasks/abc123 → /api/tasks/{id} ──
 _PATH_PATTERNS = [
     (re.compile(r"/api/tasks/[a-zA-Z0-9\-]+"), "/api/tasks/{id}"),
     (re.compile(r"/api/agents/[^/]+"), "/api/agents/{name}"),
@@ -41,7 +57,7 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
     """收集 HTTP 请求指标"""
 
     async def dispatch(self, request: Request, call_next: Callable):
-        _metrics["http_requests_in_flight"] += 1
+        http_requests_in_flight.inc()
 
         start_time = time.monotonic()
         status_code = 500
@@ -55,63 +71,20 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
             raise
         finally:
             duration = time.monotonic() - start_time
-            _metrics["http_requests_in_flight"] -= 1
+            http_requests_in_flight.dec()
 
             method = request.method
             path = _normalize_path(request.url.path)
-            key = f"{method} {path} {status_code}"
 
-            # 累计计数
-            _metrics["http_requests_total"][key] = (
-                _metrics["http_requests_total"].get(key, 0) + 1
-            )
+            http_requests_total.labels(
+                method=method, endpoint=path, status_code=str(status_code)
+            ).inc()
 
-            # 延迟采样（保留最近 1000 条）
-            dur_key = f"{method} {path}"
-            if dur_key not in _metrics["http_request_duration_seconds"]:
-                _metrics["http_request_duration_seconds"][dur_key] = []
-            durations = _metrics["http_request_duration_seconds"][dur_key]
-            durations.append(duration)
-            if len(durations) > 1000:
-                durations.pop(0)
+            http_request_duration_seconds.labels(
+                method=method, endpoint=path,
+            ).observe(duration)
 
 
 def get_metrics_text() -> str:
     """生成 Prometheus 格式的指标文本"""
-    lines = []
-
-    lines.append("# HELP http_requests_total Total HTTP requests")
-    lines.append("# TYPE http_requests_total counter")
-    for key, count in sorted(_metrics["http_requests_total"].items()):
-        lines.append(f'http_requests_total{{route="{key}"}} {count}')
-
-    lines.append("# HELP http_request_duration_seconds HTTP request duration")
-    lines.append("# TYPE http_request_duration_seconds summary")
-    for key, durations in sorted(_metrics["http_request_duration_seconds"].items()):
-        if not durations:
-            continue
-        avg = sum(durations) / len(durations)
-        max_d = max(durations)
-        min_d = min(durations)
-        lines.append(f'http_request_duration_seconds{{route="{key}",quantile="0.5"}} {_percentile(durations, 0.5):.6f}')
-        lines.append(f'http_request_duration_seconds{{route="{key}",quantile="0.9"}} {_percentile(durations, 0.9):.6f}')
-        lines.append(f'http_request_duration_seconds{{route="{key}",quantile="0.99"}} {_percentile(durations, 0.99):.6f}')
-        lines.append(f'http_request_duration_seconds_sum{{route="{key}"}} {sum(durations):.6f}')
-        lines.append(f'http_request_duration_seconds_count{{route="{key}"}} {len(durations)}')
-
-    lines.append("# HELP http_requests_in_flight Currently in-flight requests")
-    lines.append("# TYPE http_requests_in_flight gauge")
-    lines.append(f"http_requests_in_flight {_metrics['http_requests_in_flight']}")
-
-    return "\n".join(lines) + "\n"
-
-
-def _percentile(sorted_data: list[float], p: float) -> float:
-    """计算百分位数"""
-    if not sorted_data:
-        return 0.0
-    data = sorted(sorted_data)
-    k = (len(data) - 1) * p
-    f = int(k)
-    c = k - f if f + 1 < len(data) else 0
-    return data[f] + c * (data[f + 1] if f + 1 < len(data) else 0 - data[f])
+    return generate_latest(_registry).decode("utf-8")
