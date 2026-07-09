@@ -3401,8 +3401,11 @@ def start(host: str = "127.0.0.1", port: int = 8080):
     tm.start_dispatcher()
 
     # 从数据库恢复之前创建的 Agent
-    import asyncio as _asyncio
-    _asyncio.run(_restore_agents(tm))
+    try:
+        import asyncio as _asyncio
+        _asyncio.run(_restore_agents(tm))
+    except Exception as _e:
+        logger.warning(f"Agent 恢复跳过: {_e}")
 
     # 挂载多 Agent 编排器
     try:

@@ -78,12 +78,7 @@ CREATE TABLE IF NOT EXISTS agent_configs (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Agent 配置表 v2.0 字段补全（如果表已存在但缺少新列）
-ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS system_prompt TEXT DEFAULT '' AFTER description;
-ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS max_iterations INT DEFAULT 15 AFTER system_prompt;
-ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS enable_planning BOOLEAN DEFAULT FALSE AFTER max_iterations;
-ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS enable_rag BOOLEAN DEFAULT TRUE AFTER enable_planning;
-ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS enable_reflection BOOLEAN DEFAULT FALSE AFTER enable_rag;
+-- (字段补全由 Python 函数 run_column_migrations 处理，兼容所有 MySQL 版本)
 
 -- 系统日志表
 CREATE TABLE IF NOT EXISTS system_logs (
@@ -119,7 +114,38 @@ async def run_migrations(engine: AsyncEngine):
             except Exception as e:
                 logger.warning(f"SQL 执行跳过: {e}")
 
+    # 方案3：补全旧表缺失的列（兼容所有 MySQL/MariaDB 版本）
+    await _ensure_agent_configs_columns(engine)
+
     logger.info("数据库迁移完成 ✓")
+
+
+async def _ensure_agent_configs_columns(engine: AsyncEngine):
+    """确保 agent_configs 表包含所有必需列（逐列检查，兼容 MySQL 5.7+ / MariaDB）"""
+    required = [
+        ("system_prompt", "TEXT", "''"),
+        ("max_iterations", "INT", "15"),
+        ("enable_planning", "BOOLEAN", "FALSE"),
+        ("enable_rag", "BOOLEAN", "TRUE"),
+        ("enable_reflection", "BOOLEAN", "FALSE"),
+    ]
+    async with engine.begin() as conn:
+        for col_name, col_type, col_default in required:
+            try:
+                check = text(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() "
+                    "AND TABLE_NAME = 'agent_configs' "
+                    "AND COLUMN_NAME = :col"
+                )
+                result = await conn.execute(check, {"col": col_name})
+                count = result.scalar()
+                if count == 0:
+                    stmt = f"ALTER TABLE agent_configs ADD COLUMN {col_name} {col_type} DEFAULT {col_default}"
+                    await conn.execute(text(stmt))
+                    logger.info(f"已添加列: agent_configs.{col_name}")
+            except Exception as e:
+                logger.warning(f"添加列 agent_configs.{col_name} 跳过: {e}")
 
 
 async def seed_default_admin(engine: AsyncEngine):
