@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Prometheus 指标中间件 —— HTTP 请求计数、延迟、错误率
+Prometheus 指标中间件 —— HTTP 请求计数、延迟、错误率（纯 ASGI 实现）
 
 基于 prometheus_client 官方库，暴露 /metrics 端点供 Prometheus 抓取。
 """
@@ -8,12 +8,8 @@ Prometheus 指标中间件 —— HTTP 请求计数、延迟、错误率
 from __future__ import annotations
 import time
 import re
-from typing import Callable
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
-from prometheus_client import Counter, Histogram, Gauge, generate_latest, REGISTRY, CollectorRegistry
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CollectorRegistry
 
 # ── 使用独立 Registry，避免与其他库冲突 ──
 _registry = CollectorRegistry(auto_describe=True)
@@ -53,19 +49,39 @@ def _normalize_path(path: str) -> str:
     return path
 
 
-class PrometheusMiddleware(BaseHTTPMiddleware):
-    """收集 HTTP 请求指标"""
+class PrometheusMiddleware:
+    """
+    纯 ASGI Prometheus 指标中间件（不使用 BaseHTTPMiddleware，避免 aiomysql 事件循环冲突）
 
-    async def dispatch(self, request: Request, call_next: Callable):
+    收集 HTTP 请求计数、延迟、错误率。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         http_requests_in_flight.inc()
-
         start_time = time.monotonic()
+        method = scope.get("method", "UNKNOWN")
+        path = scope.get("path", "/")
+        normalized_path = _normalize_path(path)
+
+        # 用闭包捕获响应状态码
         status_code = 500
+        original_send = send
+
+        async def _send(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await original_send(message)
 
         try:
-            response = await call_next(request)
-            status_code = response.status_code
-            return response
+            await self.app(scope, receive, _send)
         except Exception:
             status_code = 500
             raise
@@ -73,15 +89,12 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
             duration = time.monotonic() - start_time
             http_requests_in_flight.dec()
 
-            method = request.method
-            path = _normalize_path(request.url.path)
-
             http_requests_total.labels(
-                method=method, endpoint=path, status_code=str(status_code)
+                method=method, endpoint=normalized_path, status_code=str(status_code)
             ).inc()
 
             http_request_duration_seconds.labels(
-                method=method, endpoint=path,
+                method=method, endpoint=normalized_path,
             ).observe(duration)
 
 
