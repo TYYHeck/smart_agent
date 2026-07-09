@@ -334,10 +334,40 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
 /* 响应式 */
 @media(max-width:768px) { .sidebar { width:200px; } .dash-grid { grid-template-columns:1fr; } .stat-cards { grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); } }
+/* 登录页 */
+.login-page { display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--bg); }
+.login-card { background:var(--sidebar); border:1px solid var(--border); border-radius:12px; padding:40px; width:400px; max-width:90vw; box-shadow:0 4px 24px rgba(0,0,0,.3); }
+.login-card h1 { color:var(--text-bright); font-size:24px; margin:0 0 8px; text-align:center; }
+.login-card h1 span { color:var(--primary); }
+.login-card .login-sub { color:var(--muted); text-align:center; margin-bottom:24px; font-size:13px; }
+.login-card .form-group { margin-bottom:16px; }
+.login-card .form-group label { display:block; color:var(--text); font-size:13px; margin-bottom:6px; }
+.login-card .form-group input { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; color:var(--text); font-size:14px; outline:none; box-sizing:border-box; }
+.login-card .form-group input:focus { border-color:var(--primary); }
+.login-card .login-btn { width:100%; background:var(--primary); color:white; border:none; border-radius:8px; padding:12px; font-size:15px; cursor:pointer; margin-top:8px; }
+.login-card .login-btn:hover { opacity:.85; }
+.login-card .login-error { color:var(--error); font-size:13px; text-align:center; margin-top:12px; display:none; }
+.login-card .login-error.show { display:block; }
+#appMain { display:none; }
+#appMain.show { display:flex; }
 </style>
 </head>
 <body>
 
+<!-- 登录页 -->
+<div class="login-page" id="loginPage">
+  <div class="login-card">
+    <h1><span>Smart</span>Agent</h1>
+    <p class="login-sub">智能 AI 助手 — 请登录</p>
+    <div class="form-group"><label>用户名</label><input type="text" id="loginUser" placeholder="admin" autocomplete="username"></div>
+    <div class="form-group"><label>密码</label><input type="password" id="loginPass" placeholder="••••••" autocomplete="current-password"></div>
+    <button class="login-btn" onclick="doLogin()">登 录</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- 主应用 -->
+<div id="appMain">
 <div class="sidebar">
   <div class="sidebar-header"><h1>SmartAgent</h1><p>智能 AI 助手</p></div>
   <div class="sidebar-section model-selector">
@@ -511,11 +541,20 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="modalContent"></div>
 </div>
+</div><!-- #appMain -->
 
 <script>
 // ==================== 全局工具 ====================
 const $ = id => document.getElementById(id);
-const api = (url, opts) => fetch(url, opts).then(r => r.json());
+const getToken = () => localStorage.getItem('sa_token');
+const apiHeaders = () => { const t=getToken(); return t?{'Authorization':'Bearer '+t}:{}; };
+const api = (url, opts) => {
+  const headers = Object.assign({}, (opts||{}).headers||{}, apiHeaders());
+  return fetch(url, Object.assign({}, opts||{}, {headers})).then(r => {
+    if(r.status===401) { logout(); throw new Error('认证已过期，请重新登录'); }
+    return r.json();
+  });
+};
 
 function formatTime(ts) { if(!ts) return '-'; const d=new Date(ts); return d.toLocaleString('zh-CN'); }
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -873,7 +912,7 @@ async function sendMessage() {
   currentAgentBubble = addBubble('agent','<div class="typing-indicator"><span></span><span></span><span></span></div>','agent-msg');
   currentToolCards = {}; let fullText='';
   try {
-    const resp = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})});
+    const resp = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json',...apiHeaders()},body:JSON.stringify({message:text})});
     const reader = resp.body.getReader(); const decoder = new TextDecoder();
     while(true) {
       const {done,value} = await reader.read(); if(done) break;
@@ -1054,7 +1093,7 @@ async function executeOrchestrated(desc) {
     const mode = $('orchModeSelect').value;
     const resp = await fetch('/api/tasks/orchestrate/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...apiHeaders() },
       body: JSON.stringify({ description: desc, title: desc.slice(0, 50), mode: mode, agent_names: [] }),
       signal: orchAbortController.signal
     });
@@ -1611,7 +1650,7 @@ async function searchKb() {
 async function deleteKbSource(source) {
   if(!confirm('确定删除来源: '+source+'?')) return;
   try {
-    await fetch('/api/knowledge/'+encodeURIComponent(source),{method:'DELETE'});
+    await fetch('/api/knowledge/'+encodeURIComponent(source),{method:'DELETE',headers:apiHeaders()});
     loadKbStats(); loadKbFiles();
   } catch(e) { alert('删除失败: '+e.message); }
 }
@@ -1619,7 +1658,7 @@ async function deleteKbSource(source) {
 async function clearKb() {
   if(!confirm('确认清空整个知识库？此操作不可撤销！')) return;
   try {
-    await fetch('/api/knowledge/clear',{method:'DELETE'});
+    await fetch('/api/knowledge/clear',{method:'DELETE',headers:apiHeaders()});
     loadKbStats(); loadKbFiles();
   } catch(e) { alert('清空失败: '+e.message); }
 }
@@ -1635,7 +1674,7 @@ function showKbUploadModal() {
       const formData = new FormData();
       for(const f of files) formData.append('files', f);
       try {
-        const resp = await fetch('/api/knowledge/upload',{method:'POST',body:formData});
+        const resp = await fetch('/api/knowledge/upload',{method:'POST',body:formData,headers:apiHeaders()});
         const data = await resp.json();
         if(data.ok) {
           alert('成功上传 '+data.uploaded+' 个文件，共 '+data.chunks+' 个文档块');
@@ -1944,20 +1983,56 @@ async function saveSection(section) {
   } catch(e) { alert('保存失败: '+e.message); }
 }
 
-// ==================== 初始化 ====================
-loadCommands();
-initAgentCombo();
-loadDashboard();
+// ==================== 登录 / 登出 ====================
+function showLogin(msg) {
+  $('appMain').classList.remove('show');
+  $('loginPage').style.display = 'flex';
+  if(msg) { $('loginError').textContent = msg; $('loginError').classList.add('show'); }
+}
+function showApp() {
+  $('loginPage').style.display = 'none';
+  $('appMain').classList.add('show');
+}
+async function doLogin() {
+  const username = $('loginUser').value.trim();
+  const password = $('loginPass').value;
+  if(!username||!password) { $('loginError').textContent = '请输入用户名和密码'; $('loginError').classList.add('show'); return; }
+  try {
+    const r = await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
+    const d = await r.json();
+    if(!d.ok) { $('loginError').textContent = d.error||'登录失败'; $('loginError').classList.add('show'); return; }
+    localStorage.setItem('sa_token', d.access_token);
+    showApp();
+    initApp();
+  } catch(e) { $('loginError').textContent = '连接服务器失败'; $('loginError').classList.add('show'); }
+}
+function logout() {
+  localStorage.removeItem('sa_token');
+  document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+  showLogin();
+}
+$('loginPass').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 
-api('/api/config').then(c => {
-  initModelCombo(c.models||[], c.model);
-  $('togglePlan').checked = c.planning;
-  $('toggleRag').checked = c.rag;
-  $('toggleReflect').checked = c.reflection;
-  $('stat-tools').textContent = c.tools;
-  $('stat-lc').textContent = c.langchain?'启用':'兼容模式';
-  addBubble('agent','你好！我是 SmartAgent。左侧「仪表盘」查看数据概览，「对话」进行交互，「任务管理」发布任务，「Agent管理」管理智能体，「配置」编辑系统参数。');
-});
+// ==================== 初始化 ====================
+function initApp() {
+  if(!getToken()) { showLogin(); return; }
+  showApp();
+  loadCommands();
+  initAgentCombo();
+  loadDashboard();
+  api('/api/config').then(c => {
+    initModelCombo(c.models||[], c.model);
+    $('togglePlan').checked = c.planning;
+    $('toggleRag').checked = c.rag;
+    $('toggleReflect').checked = c.reflection;
+    $('stat-tools').textContent = c.tools;
+    $('stat-lc').textContent = c.langchain?'启用':'兼容模式';
+    addBubble('agent','你好！我是 SmartAgent。左侧「仪表盘」查看数据概览，「对话」进行交互，「任务管理」发布任务，「Agent管理」管理智能体，「配置」编辑系统参数。');
+  }).catch(e => { console.error(e); if(e.message.includes('401')) logout(); });
+}
+
+// 页面加载时检查登录状态
+initApp();
 
 // ==================== 自动轮询刷新 ====================
 let autoRefreshTimer = null, currentTaskFilter = '';
