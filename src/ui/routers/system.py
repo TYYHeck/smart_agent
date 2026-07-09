@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from src.auth.dependencies import get_current_user
+from src.core.task_manager import get_task_manager
 
 config_router = APIRouter(prefix="/api/config", tags=["配置"])
 model_router = APIRouter(tags=["模型"])
