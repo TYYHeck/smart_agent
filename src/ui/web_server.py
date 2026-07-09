@@ -1130,8 +1130,17 @@ async function executeOrchestrated(desc) {
       body: JSON.stringify({ description: desc, title: desc.slice(0, 50), mode: mode, agent_names: [] }),
       signal: orchAbortController.signal
     });
+
+    // 非 200 响应：读错误 JSON 并显示
+    if (!resp.ok) {
+      let errDetail = '服务器错误 (' + resp.status + ')';
+      try { const errJson = await resp.json(); errDetail = errJson.detail || errDetail; } catch(e) {}
+      throw new Error(errDetail);
+    }
+
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
+    let receivedEvents = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -1140,11 +1149,17 @@ async function executeOrchestrated(desc) {
         if (!line.startsWith('data: ')) continue;
         try {
           const data = JSON.parse(line.slice(6));
+          receivedEvents = true;
           handleOrchEvent(data, flowContainer, resultContainer, events);
           if (data.stage === 'done') finalResult = data.result;
           if (data.stage === 'error') finalResult = { error: data.error };
         } catch (e) {}
       }
+    }
+
+    // SSE 流正常结束但无任何事件：显示错误
+    if (!receivedEvents) {
+      flowContainer.innerHTML += `<div class="orch-stage-card stage-error"><div class="stage-header"><span class="stage-icon">❌</span><span class="stage-title">连接异常</span></div><div class="stage-detail">服务器未返回编排数据，请检查后端日志</div></div>`;
     }
   } catch (err) {
     if (err.name !== 'AbortError') {
