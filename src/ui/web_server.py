@@ -3501,7 +3501,9 @@ def init_agent():
             async def _recreate_db_engine():
                 from src.infrastructure.database import create_engine as recreate_engine
                 recreate_engine()
-                logger.info("数据库引擎已在 uvicorn loop 上重建")
+                # 注入主事件循环引用 —— 供跨线程 DB 持久化使用
+                tm._main_loop = asyncio.get_running_loop()
+                logger.info("数据库引擎已在 uvicorn loop 上重建，_main_loop 已注入")
 
         else:
             logger.warning("MySQL 连接失败，使用内存模式")

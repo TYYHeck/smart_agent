@@ -21,15 +21,11 @@ import json
 import logging
 import re
 import asyncio as _asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 # ── 当前执行上下文（用于 write_file 自动关联任务）──
 _current_task_id: ContextVar[Optional[str]] = ContextVar("current_task_id", default=None)
 
 logger = logging.getLogger("smart_agent.task_manager")
-
-# 后台线程池，用于在同步上下文中执行异步 DB 写入
-_db_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="db_persist")
 
 
 # ============================================================
@@ -169,27 +165,26 @@ class TaskManager:
         return self._repo
 
     def _run_async(self, coro):
-        """在任意上下文中安全执行异步协程（fire-and-forget 写操作）"""
+        """在任意上下文中安全执行异步协程（fire-and-forget 写操作）
+        
+        核心约束：SQLAlchemy async (aiomysql) 的连接池绑定到创建时的
+        event loop，绝不能在新 loop 中运行——否则会触发
+        "Future attached to a different loop" 崩溃。
+        """
         try:
             loop = _asyncio.get_running_loop()
             loop.create_task(coro)
         except RuntimeError:
-            # 不在 asyncio 线程中 → 投回主事件循环（避免 SQLAlchemy async 跨循环错误）
+            # 不在 asyncio 线程中 → 只能投回主事件循环
             main_loop = self._main_loop
             if main_loop is not None and main_loop.is_running():
                 _asyncio.run_coroutine_threadsafe(coro, main_loop)
             else:
-                _db_executor.submit(self._run_in_thread, coro)
-
-    @staticmethod
-    def _run_in_thread(coro):
-        """在新线程的事件循环中执行协程"""
-        loop = _asyncio.new_event_loop()
-        _asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(coro)
-        finally:
-            loop.close()
+                # _main_loop 未注入或已停止 → 无法安全写入 DB，跳过
+                logger.warning(
+                    "DB 持久化跳过：_main_loop 不可用（未注入或已停止）。"
+                    "请确保应用启动时注入 tm._main_loop = asyncio.get_running_loop()"
+                )
 
     def _persist_task(self, task: Task):
         """将任务写入数据库（fire-and-forget）"""
