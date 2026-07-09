@@ -1164,6 +1164,23 @@ function handleOrchEvent(data, flowContainer, resultContainer, events) {
   // 各阶段进度渲染
   if (stage.startsWith('stage_')) {
     const evtName = stage.replace('stage_', '');
+    // 编排完成信号（备份通道，从 on_progress 回调传入）→ 直接渲染结果
+    if (evtName === 'orchestration_complete') {
+      renderOrchResult({
+        task_id: info.task_id,
+        mode: info.mode,
+        mode_reason: info.mode_reason,
+        agents_used: info.agents,
+        final_result: info.final_result,
+        output_files: info.output_files,
+        agent_results: info.agent_results,
+        success: info.success,
+        started_at: info.started_at,
+        finished_at: info.finished_at,
+      }, resultContainer);
+      appendOrchStageCard(evtName, info, flowContainer);
+      return;
+    }
     appendOrchStageCard(evtName, info, flowContainer);
   }
 
@@ -1204,6 +1221,8 @@ function appendOrchStageCard(evtName, info, container) {
     collab_round2: { icon: '🔄', title: '第 2 轮讨论 — 交叉审阅', detail: 'Agent 审阅他人观点，修正完善自身结论' },
     collab_synthesizing: { icon: '🧩', title: '综合共识中...', detail: '主持人综合团队讨论结果' },
     collab_done: { icon: '🎉', title: '协作讨论完成', detail: '团队达成共识', cls: 'stage-done' },
+
+    orchestration_complete: { icon: '✅', title: '编排执行完成', detail: '所有 Agent 任务已结束，结果见下方面板', cls: 'stage-done' },
   };
 
   const tpl = templates[evtName];

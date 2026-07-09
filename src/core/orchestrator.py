@@ -322,6 +322,20 @@ class Orchestrator:
             self.tm._persist_events(task)
             _current_task_id.reset(prev_task_id)  # 恢复上下文
 
+            # ── 通过 on_progress 发送完成信号（备份通道，确保前端收到完成通知）──
+            self._emit_progress(on_progress, "orchestration_complete", {
+                "task_id": task.id,
+                "success": result.success,
+                "mode": mode.value,
+                "mode_reason": mode_reason,
+                "agents": result.agents_used,
+                "final_result": (result.final_result or "")[:2000],
+                "output_files": list(task.output_files),
+                "agent_results": result.agent_results,
+                "started_at": result.started_at.isoformat() if result.started_at else None,
+                "finished_at": datetime.now().isoformat(),
+            })
+
         result.finished_at = datetime.now()
         return result
 

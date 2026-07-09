@@ -135,7 +135,8 @@ def read_file(filepath: str) -> str:
         return f"读取失败: {str(e)}"
 
 
-@tool(description="将内容写入文件。会覆盖已有文件。", dangerous=False)
+@tool(description="将内容写入本地文件（会覆盖已有文件）。支持 .txt .md .py .json .csv .html 等格式。生成后文件自动关联到当前任务，可在前端下载。重要：完成分析报告、代码、数据导出等任务后应主动调用此工具保存结果。",
+      dangerous=False)
 def write_file(filepath: str, content: str) -> str:
     """写入本地文件"""
     try:
@@ -179,6 +180,10 @@ _SAFE_MODULES = {
     "math", "json", "re", "datetime", "collections", "itertools",
     "functools", "random", "statistics", "decimal", "fractions",
     "operator", "hashlib", "base64", "uuid",
+    # ── 图片/图表生成 ──
+    "matplotlib", "matplotlib.pyplot", "PIL",
+    # ── IO 辅助 ──
+    "io", "os", "os.path", "tempfile",
 }
 
 
@@ -302,7 +307,97 @@ def calculator(expression: str) -> str:
 
 
 # ============================================================
-# 6. 批量注册所有内置工具
+# 6. 图片/图表生成
+# ============================================================
+
+@tool(description="生成图表或图片并保存到本地文件。支持折线图、柱状图、饼图等。调用后文件自动关联到任务。",
+      dangerous=False)
+def generate_image(chart_type: str, title: str, labels: str, values: str, filepath: str = "") -> str:
+    """
+    使用 matplotlib 生成图表图片。
+
+    Args:
+        chart_type: 图表类型 — line(折线图) / bar(柱状图) / pie(饼图) / scatter(散点图)
+        title: 图表标题
+        labels: 标签列表，逗号分隔，如 "A,B,C,D"
+        values: 数值列表，逗号分隔，如 "10,25,15,30"
+        filepath: 保存路径（可选，默认 output/chart_时间戳.png）
+
+    Returns:
+        生成结果描述，包含文件路径
+    """
+    import matplotlib
+    matplotlib.use("Agg")  # 非 GUI 后端
+    import matplotlib.pyplot as plt
+    from io import BytesIO
+    import base64 as b64
+    import os
+
+    try:
+        label_list = [x.strip() for x in labels.split(",")]
+        value_list = [float(x.strip()) for x in values.split(",")]
+
+        if len(label_list) != len(value_list):
+            return f"❌ labels 和 values 数量不一致: {len(label_list)} vs {len(value_list)}"
+
+        # 设置中文字体（尝试）
+        try:
+            plt.rcParams["font.sans-serif"] = ["SimHei", "WenQuanYi Micro Hei",
+                                                "Noto Sans CJK SC", "DejaVu Sans"]
+            plt.rcParams["axes.unicode_minus"] = False
+        except Exception:
+            pass
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        if chart_type == "bar":
+            ax.bar(label_list, value_list, color="steelblue", edgecolor="white")
+        elif chart_type == "pie":
+            ax.pie(value_list, labels=label_list, autopct="%1.1f%%",
+                   colors=plt.cm.Set3(range(len(label_list))))
+        elif chart_type == "scatter":
+            ax.scatter(label_list, value_list, color="coral", s=100)
+        else:  # line 默认
+            ax.plot(label_list, value_list, marker="o", linewidth=2, markersize=8)
+
+        ax.set_title(title, fontsize=14)
+        if chart_type != "pie":
+            ax.set_ylabel("数值")
+            ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        # 确定保存路径
+        if not filepath:
+            ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = f"output/chart_{ts}.png"
+
+        abs_path = os.path.abspath(_resolve_path(filepath))
+        os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
+        fig.savefig(abs_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        # ── 自动关联到当前任务 ──
+        try:
+            from ..core.task_manager import _current_task_id, get_task_manager
+            task_id = _current_task_id.get()
+            if task_id:
+                tm = get_task_manager()
+                tm.record_output_file(task_id, abs_path)
+        except Exception:
+            pass
+
+        return f"✅ 图表已生成: {abs_path} (类型: {chart_type}, 数据点: {len(label_list)})"
+    except Exception as e:
+        try:
+            plt.close("all")
+        except Exception:
+            pass
+        return f"图片生成失败: {str(e)}"
+
+
+# ============================================================
+# 7. 批量注册所有内置工具
 # ============================================================
 
 ALL_BUILTIN_TOOLS = [
@@ -312,6 +407,7 @@ ALL_BUILTIN_TOOLS = [
     write_file,
     run_python,
     calculator,
+    generate_image,
 ]
 
 

@@ -63,3 +63,5 @@ pytest-mock>=3.12.0            # Mock 支持
 # === 可选增强 ===
 pypdf>=4.0.0                  # PDF 加载
 markdown>=3.5.0               # Markdown 解析
+Pillow>=10.0.0                # 图片处理 / 生成
+matplotlib>=3.8.0             # 数据可视化 / 图表生成
