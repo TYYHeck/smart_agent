@@ -917,6 +917,7 @@ async function toggleMode(mode) {
 
 function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,150)+'px'; }
 
+if (inputEl) {
 inputEl.addEventListener('keydown', e => {
   if(slashDropdown.classList.contains('show')) {
     if(e.key==='ArrowDown'||e.key==='ArrowUp') { e.preventDefault(); navSlash(e.key); return; }
@@ -928,6 +929,7 @@ inputEl.addEventListener('keydown', e => {
 inputEl.addEventListener('input', () => {
   if(inputEl.value.startsWith('/')) showSlashDropdown(); else slashDropdown.classList.remove('show');
 });
+}
 
 function scrollBottom() { chatEl.scrollTop = chatEl.scrollHeight; }
 
@@ -1146,9 +1148,6 @@ async function submitNewTask() {
 
   const orchMode = getModalOrchMode();
   await executeOrchestrated(fullDesc, title, orchMode);
-}
-
-  taskModalFiles = [];
 }
 
 async function filterTasks(status, btn) {
