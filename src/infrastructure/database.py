@@ -92,6 +92,18 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+def reset_engine():
+    """重置引擎全局引用（不 dispose，假设 dispose 已由调用方完成）
+
+    dispose 后再调用此函数，确保 uvicorn startup 事件中重建引擎时
+    创建全新的 aiomysql 连接（绑定到 uvicorn 的事件循环）。
+    """
+    global _engine, _session_factory
+    _engine = None
+    _session_factory = None
+    logger.info("数据库引擎引用已重置，等待 uvicorn loop 重建")
+
+
 async def close_engine():
     """关闭数据库引擎"""
     global _engine, _session_factory

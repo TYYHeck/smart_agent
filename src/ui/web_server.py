@@ -3471,9 +3471,19 @@ def init_agent():
             # 清空 _db_loop 绑定的连接池，后续 uvicorn loop 自行创建连接
             try:
                 _db_loop.run_until_complete(engine.dispose())
+                from src.infrastructure.database import reset_engine
+                reset_engine()
                 logger.info("数据库连接池已重置，等待 uvicorn loop 接管")
             except Exception as e:
                 logger.warning(f"连接池重置失败: {e}")
+
+            # 在 uvicorn startup 中重建引擎 —— 此时在 uvicorn 自己的事件循环上
+            @app.on_event("startup")
+            async def _recreate_db_engine():
+                from src.infrastructure.database import create_engine as recreate_engine
+                recreate_engine()
+                logger.info("数据库引擎已在 uvicorn loop 上重建")
+
         else:
             logger.warning("MySQL 连接失败，使用内存模式")
     else:
