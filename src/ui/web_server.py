@@ -367,6 +367,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
     <button class="tab-btn" onclick="switchTab('chat')"><span class="tab-icon">💬</span>对话</button>
     <button class="tab-btn" onclick="switchTab('tasks')"><span class="tab-icon">📋</span>任务管理</button>
     <button class="tab-btn" onclick="switchTab('agents')"><span class="tab-icon">🤖</span>Agent管理</button>
+    <button class="tab-btn" onclick="switchTab('knowledge')"><span class="tab-icon">📚</span>知识库</button>
     <button class="tab-btn" onclick="switchTab('files')"><span class="tab-icon">📁</span>输出文件</button>
     <button class="tab-btn" onclick="switchTab('config')"><span class="tab-icon">⚙️</span>配置</button>
   </div>
@@ -453,6 +454,39 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
       <h2>系统配置</h2>
       <p style="color:var(--muted);margin-bottom:16px;">修改后点击「保存」写入 config.yaml，需重启服务生效。</p>
       <div id="configSections"></div>
+    </div>
+  </div>
+
+  <!-- ===== 知识库 ===== -->
+  <div id="tab-knowledge" class="tab-content">
+    <div class="task-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h2 style="margin:0;">📚 知识库管理</h2>
+        <button class="btn btn-primary" onclick="showKbUploadModal()">+ 上传文件</button>
+      </div>
+      <p style="color:var(--muted);margin-bottom:12px;font-size:12px;">
+        上传文档到知识库后，Agent 可通过 RAG 检索相关片段增强回答质量。
+      </p>
+      <!-- 知识库统计 -->
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;gap:24px;font-size:13px;">
+        <div>📊 文档块: <b id="kbChunks" style="color:var(--primary);">0</b></div>
+        <div>📂 来源数: <b id="kbSources" style="color:var(--primary);">0</b></div>
+        <div style="margin-left:auto;">
+          <button class="btn btn-outline btn-sm" onclick="loadKbStats()">🔄 刷新</button>
+          <button class="btn btn-danger btn-sm" onclick="clearKb()">🗑 清空</button>
+        </div>
+      </div>
+      <!-- 知识库检索 -->
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <input id="kbSearchInput" class="form-input" placeholder="输入关键词搜索知识库..." style="flex:1;" onkeydown="if(event.key==='Enter')searchKb()">
+        <button class="btn btn-primary" onclick="searchKb()">🔍 搜索</button>
+      </div>
+      <div id="kbSearchResults" style="margin-bottom:16px;"></div>
+      <!-- 已上传文件列表 -->
+      <h3 style="color:var(--text-bright);margin-bottom:8px;font-size:14px;">已上传文件</h3>
+      <div id="kbFilesList">
+        <div style="color:var(--muted);padding:12px 0;">加载中...</div>
+      </div>
     </div>
   </div>
 
@@ -558,6 +592,7 @@ function switchTab(tab) {
   if(tab === 'dashboard') loadDashboard();
   else if(tab === 'tasks') { refreshTasks(''); refreshAgentCombo(); }
   else if(tab === 'agents') loadAgents();
+  else if(tab === 'knowledge') { loadKbStats(); loadKbFiles(); }
   else if(tab === 'files') loadOutputFiles();
   else if(tab === 'config') loadConfig();
 }
@@ -1372,10 +1407,11 @@ async function loadAgents() {
     const models = await api('/api/models');
     $('agentTable').innerHTML = `
       <table class="data-table">
-        <tr><th>名称</th><th>状态</th><th>技能</th><th>描述</th><th>操作</th></tr>
+        <tr><th>名称</th><th>状态</th><th>提示词</th><th>技能</th><th>描述</th><th>操作</th></tr>
         ${agents.map(a => `<tr>
           <td><b>${escHtml(a.name)}</b></td>
           <td><span class="status-badge ${a.status}">${a.status}</span></td>
+          <td style="text-align:center">${a.has_custom_prompt ? '<span title="已自定义 System Prompt" style="color:var(--primary);font-weight:bold">自定</span>' : '<span style="color:var(--muted);">默认</span>'}</td>
           <td>${(a.skills||[]).map(s=>`<span class="skill-tag">${escHtml(s)}</span>`).join('')||'<span style="color:var(--muted);">通用</span>'}</td>
           <td style="font-size:12px;color:var(--muted);">${escHtml(a.description||'-')}</td>
           <td class="table-actions">
@@ -1389,15 +1425,41 @@ async function loadAgents() {
 
 function showCreateAgentModal() {
   openModal('创建 Agent',
-    `<div class="form-group"><label>名称</label><input class="form-input" id="caName" placeholder="例如: 代码助手"></div>
+    `<div class="form-group"><label>名称 <span style="color:var(--danger)">*</span></label><input class="form-input" id="caName" placeholder="例如: 代码助手"></div>
      <div class="form-group"><label>模型</label><select class="form-select" id="caModel"></select></div>
      <div class="form-group"><label>技能 (逗号分隔)</label><input class="form-input" id="caSkills" placeholder="例如: coding, python, debug"></div>
-     <div class="form-group"><label>描述</label><input class="form-input" id="caDesc" placeholder="一句话描述"></div>`,
+     <div class="form-group"><label>描述</label><input class="form-input" id="caDesc" placeholder="一句话描述"></div>
+     <div class="form-group">
+       <label>System Prompt <span style="color:var(--muted);font-weight:normal">（可选，留空自动生成，最长5000字符）</span></label>
+       <textarea class="form-input" id="caPrompt" rows="4" style="resize:vertical;font-family:monospace;font-size:13px"
+         placeholder="例如：你是一个专业的 Python 代码审查助手，擅长指出安全漏洞和性能问题。回答时请：&#10;1. 先指出问题严重级别&#10;2. 给出具体修复建议&#10;3. 附带修复后的代码示例"></textarea>
+       <small style="color:var(--muted)" id="caPromptCount">0 / 5000</small>
+     </div>
+     <div class="form-group"><label>最大迭代次数</label><input class="form-input" id="caMaxIter" type="number" min="1" max="50" value="15"></div>
+     <div class="form-group" style="display:flex;gap:16px;flex-wrap:wrap">
+       <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+         <input type="checkbox" id="caPlanning"> 计划模式
+       </label>
+       <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+         <input type="checkbox" id="caRag" checked> RAG 知识库
+       </label>
+       <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+         <input type="checkbox" id="caReflection"> 反思模式
+       </label>
+     </div>`,
     async () => {
       const skills = $('caSkills').value.split(',').map(s=>s.trim()).filter(Boolean);
       const modelVal = $('caModel').value.split('|');
       await api('/api/agents/create',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({name:$('caName').value, model:modelVal[0], provider:modelVal[1], skills, description:$('caDesc').value})
+        body:JSON.stringify({
+          name:$('caName').value, model:modelVal[0], provider:modelVal[1],
+          skills, description:$('caDesc').value,
+          system_prompt:$('caPrompt').value,
+          max_iterations:parseInt($('caMaxIter').value)||15,
+          enable_planning:$('caPlanning').checked,
+          enable_rag:$('caRag').checked,
+          enable_reflection:$('caReflection').checked,
+        })
       });
       loadAgents(); refreshAgentCombo();
     }, '创建'
@@ -1406,28 +1468,185 @@ function showCreateAgentModal() {
   api('/api/models').then(d => {
     $('caModel').innerHTML = (d.models||[]).map(m => `<option value="${m.id}|${m.provider}">${m.name} (${m.provider})</option>`).join('');
   });
+  // ── system_prompt 字数统计 ──
+  setTimeout(() => {
+    const el = $('caPrompt');
+    if (el) {
+      el.addEventListener('input', () => {
+        const len = el.value.length;
+        const counter = $('caPromptCount');
+        if (counter) {
+          counter.textContent = len + ' / 5000';
+          counter.style.color = len > 4500 ? 'var(--danger)' : len > 3500 ? 'var(--warning,#f0ad4e)' : 'var(--muted)';
+        }
+      });
+    }
+  }, 100);
 }
 
 function showEditAgentModal(name) {
-  api('/api/agents/list').then(d => {
-    const a = (d.agents||[]).find(x=>x.name===name);
+  // 先获取 Agent 详情（含 system_prompt 等完整信息）
+  Promise.all([
+    api('/api/agents/list'),
+    api('/api/agents/' + encodeURIComponent(name) + '/config'),
+  ]).then(([listData, cfgData]) => {
+    const a = (listData.agents||[]).find(x=>x.name===name);
     if(!a) return alert('Agent 未找到');
+    const cfg = (cfgData && cfgData.ok) ? cfgData.config || {} : {};
+
+    const sp = cfg.system_prompt || '';
+    const planChk = cfg.enable_planning ? ' checked' : '';
+    const ragChk = (cfg.enable_rag !== false) ? ' checked' : '';
+    const refChk = cfg.enable_reflection ? ' checked' : '';
+    const maxIter = cfg.max_iterations || 15;
+
     openModal('编辑 Agent: '+name,
       `<div class="form-group"><label>技能 (逗号分隔)</label><input class="form-input" id="eaSkills" value="${escHtml((a.skills||[]).join(','))}"></div>
-       <div class="form-group"><label>描述</label><input class="form-input" id="eaDesc" value="${escHtml(a.description||'')}"></div>`,
+       <div class="form-group"><label>描述</label><input class="form-input" id="eaDesc" value="${escHtml(a.description||'')}"></div>
+       <div class="form-group">
+         <label>System Prompt <span style="color:var(--muted);font-weight:normal">（最长5000字符）</span></label>
+         <textarea class="form-input" id="eaPrompt" rows="4" style="resize:vertical;font-family:monospace;font-size:13px">${escHtml(sp)}</textarea>
+         <small style="color:var(--muted)" id="eaPromptCount">${sp.length} / 5000</small>
+       </div>
+       <div class="form-group"><label>最大迭代次数</label><input class="form-input" id="eaMaxIter" type="number" min="1" max="50" value="${maxIter}"></div>
+       <div class="form-group" style="display:flex;gap:16px;flex-wrap:wrap">
+         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+           <input type="checkbox" id="eaPlanning"${planChk}> 计划模式
+         </label>
+         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+           <input type="checkbox" id="eaRag"${ragChk}> RAG 知识库
+         </label>
+         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+           <input type="checkbox" id="eaReflection"${refChk}> 反思模式
+         </label>
+       </div>`,
       async () => {
         const skills = $('eaSkills').value.split(',').map(s=>s.trim()).filter(Boolean);
         await api('/api/agents/'+encodeURIComponent(name)+'/update',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({skills,description:$('eaDesc').value})});
+          body:JSON.stringify({
+            skills, description:$('eaDesc').value,
+            system_prompt:$('eaPrompt').value,
+            max_iterations:parseInt($('eaMaxIter').value)||15,
+            enable_planning:$('eaPlanning').checked,
+            enable_rag:$('eaRag').checked,
+            enable_reflection:$('eaReflection').checked,
+          })});
         loadAgents(); refreshAgentCombo();
       }, '保存'
     );
+    // ── 字数统计 ──
+    setTimeout(() => {
+      const el = $('eaPrompt');
+      if (el) {
+        el.addEventListener('input', () => {
+          const len = el.value.length;
+          const counter = $('eaPromptCount');
+          if (counter) {
+            counter.textContent = len + ' / 5000';
+            counter.style.color = len > 4500 ? 'var(--danger)' : len > 3500 ? 'var(--warning,#f0ad4e)' : 'var(--muted)';
+          }
+        });
+      }
+    }, 100);
   });
 }
 
 async function deleteAgent(name) {
   if(!confirm('确定删除 Agent: '+name+'?')) return;
   try { await api('/api/agents/'+encodeURIComponent(name),{method:'DELETE'}); loadAgents(); refreshAgentCombo(); } catch(e) { console.error(e); }
+}
+
+// ==================== 知识库管理 ====================
+async function loadKbStats() {
+  try {
+    const data = await api('/api/knowledge/stats');
+    if(data.ok) { $('kbChunks').textContent = data.chunks||0; $('kbSources').textContent = data.sources||0; }
+  } catch(e) {}
+}
+
+async function loadKbFiles() {
+  try {
+    const data = await api('/api/knowledge/files');
+    if(!data.ok) { $('kbFilesList').innerHTML = '<div style="color:var(--muted);">加载失败</div>'; return; }
+    const files = data.files||[];
+    if(files.length===0) {
+      $('kbFilesList').innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center;">暂无已上传文件。<br>点击「上传文件」添加文档。</div>';
+      return;
+    }
+    let html = '<table class="data-table"><tr><th>来源</th><th>切片数</th><th>操作</th></tr>';
+    files.forEach(f => {
+      html += `<tr>
+        <td><b>${escHtml(f.source)}</b></td>
+        <td>${f.chunks||0}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteKbSource('${escAttr(f.source)}')">删除</button></td>
+      </tr>`;
+    });
+    html += '</table>';
+    $('kbFilesList').innerHTML = html;
+  } catch(e) {}
+}
+
+async function searchKb() {
+  const q = $('kbSearchInput').value.trim();
+  if(!q) return;
+  try {
+    const data = await api('/api/knowledge/search?q='+encodeURIComponent(q)+'&top_k=5');
+    if(!data.ok) { $('kbSearchResults').innerHTML = '<div style="color:var(--error);">搜索失败</div>'; return; }
+    const results = data.results||[];
+    if(results.length===0) {
+      $('kbSearchResults').innerHTML = '<div style="color:var(--muted);padding:8px;">未找到相关文档</div>';
+      return;
+    }
+    let html = '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">找到 '+results.length+' 个结果</div>';
+    results.forEach((r,i) => {
+      html += `<div style="background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:8px;">
+        <div style="font-size:12px;color:var(--primary);margin-bottom:4px;">#${i+1} 来源: ${escHtml(r.source||'?')} | 相关度: ${(r.score||0).toFixed(3)}</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.6;">${escHtml((r.text||'').slice(0,300))}...</div>
+      </div>`;
+    });
+    $('kbSearchResults').innerHTML = html;
+  } catch(e) { $('kbSearchResults').innerHTML = '<div style="color:var(--error);">搜索出错: '+escHtml(e.message)+'</div>'; }
+}
+
+async function deleteKbSource(source) {
+  if(!confirm('确定删除来源: '+source+'?')) return;
+  try {
+    await fetch('/api/knowledge/'+encodeURIComponent(source),{method:'DELETE'});
+    loadKbStats(); loadKbFiles();
+  } catch(e) { alert('删除失败: '+e.message); }
+}
+
+async function clearKb() {
+  if(!confirm('确认清空整个知识库？此操作不可撤销！')) return;
+  try {
+    await fetch('/api/knowledge/clear',{method:'DELETE'});
+    loadKbStats(); loadKbFiles();
+  } catch(e) { alert('清空失败: '+e.message); }
+}
+
+function showKbUploadModal() {
+  openModal('上传文件到知识库',
+    `<div class="form-group"><label>选择文件（支持 txt/md/py/pdf/json/csv/html 等）</label>
+     <input type="file" id="kbUploadFiles" class="form-input" multiple accept=".txt,.md,.py,.js,.ts,.json,.yaml,.yml,.html,.css,.pdf,.csv,.xml,.log" style="padding:8px;"></div>
+     <div class="form-help">最大 20MB/文件，可多选</div>`,
+    async () => {
+      const files = $('kbUploadFiles').files;
+      if(!files||files.length===0) { alert('请选择文件'); return; }
+      const formData = new FormData();
+      for(const f of files) formData.append('files', f);
+      try {
+        const resp = await fetch('/api/knowledge/upload',{method:'POST',body:formData});
+        const data = await resp.json();
+        if(data.ok) {
+          alert('成功上传 '+data.uploaded+' 个文件，共 '+data.chunks+' 个文档块');
+          loadKbStats(); loadKbFiles();
+        } else {
+          alert('上传失败: '+(data.detail||'未知错误'));
+        }
+      } catch(e) { alert('上传失败: '+e.message); }
+    }, '上传'
+  );
+  $('modalContent').classList.add('wide');
 }
 
 // ==================== 输出文件浏览 ====================
@@ -1621,6 +1840,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- 注册模块化路由 ---
+from src.ui.routers import all_routers
+for r in all_routers:
+    app.include_router(r)
 
 # --- 速率限制、监控中间件 (延迟加载，避免循环导入) ---
 _rate_limit_middleware = None
@@ -2476,7 +2700,12 @@ def _get_agent_persist_executor():
         _agent_persist_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent_db")
     return _agent_persist_executor
 
-async def _persist_agent_to_db(name: str, model: str, provider: str, skills: list[str], description: str):
+async def _persist_agent_to_db(
+    name: str, model: str, provider: str, skills: list[str], description: str,
+    system_prompt: str = "", max_iterations: int = 15,
+    enable_planning: bool = False, enable_rag: bool = True,
+    enable_reflection: bool = False,
+):
     """将 Agent 配置写入 MySQL agent_configs 表"""
     import logging as _logging
     _log = _logging.getLogger("smart_agent.web")
@@ -2494,6 +2723,12 @@ async def _persist_agent_to_db(name: str, model: str, provider: str, skills: lis
         _log.warning(f"Agent '{name}' 未持久化: _session_factory 为 None")
         return
 
+    # ── system_prompt 长度限制 ──
+    sp = (system_prompt or "").strip()
+    if len(sp) > 5000:
+        sp = sp[:5000]
+        _log.warning(f"Agent '{name}' 的 system_prompt 超过 5000 字符，已截断")
+
     from src.infrastructure.models import AgentConfigModel
     try:
         async with _session_factory() as session:
@@ -2503,11 +2738,19 @@ async def _persist_agent_to_db(name: str, model: str, provider: str, skills: lis
                 existing.provider = provider
                 existing.skills = skills
                 existing.description = description
+                existing.system_prompt = sp
+                existing.max_iterations = max_iterations
+                existing.enable_planning = enable_planning
+                existing.enable_rag = enable_rag
+                existing.enable_reflection = enable_reflection
                 _log.info(f"Agent '{name}' 已更新到数据库")
             else:
                 cfg = AgentConfigModel(
                     name=name, model=model, provider=provider,
                     skills=skills, description=description,
+                    system_prompt=sp, max_iterations=max_iterations,
+                    enable_planning=enable_planning, enable_rag=enable_rag,
+                    enable_reflection=enable_reflection,
                 )
                 session.add(cfg)
                 _log.info(f"Agent '{name}' 已写入数据库")
@@ -2543,16 +2786,25 @@ async def _restore_agents(tm):
             config = LLMConfig(provider=cfg.provider or "deepseek", model=cfg.model or "deepseek-chat")
             new_agent = Agent()
             new_agent.name = cfg.name
+
+            # ── 恢复 system_prompt（优先数据库存储，否则自动生成）──
+            sp = (cfg.system_prompt or "").strip()
+            if not sp:
+                skills = cfg.skills or []
+                skill_desc = f"专注于{'、'.join(skills)}" if skills else "通用"
+                sp = f"你是 {cfg.name}，一个{skill_desc}的 AI 助手。请用你的专业知识高效完成用户的任务。"
+            new_agent.system_prompt = sp
+
             skills = cfg.skills or []
-            skill_desc = f"专注于{'、'.join(skills)}" if skills else "通用"
-            new_agent.system_prompt = (
-                f"你是 {cfg.name}，一个{skill_desc}的 AI 助手。"
-                f"请用你的专业知识高效完成用户的任务。"
-            )
+            new_agent.max_iterations = getattr(cfg, 'max_iterations', None) or 15
+            new_agent.enable_planning = bool(getattr(cfg, 'enable_planning', False))
+            new_agent.enable_rag = bool(getattr(cfg, 'enable_rag', True))
+            new_agent.enable_reflection = bool(getattr(cfg, 'enable_reflection', False))
             new_agent.init(config)
             register_all(new_agent.tools)
             if hasattr(new_agent, '_rebuild_graph'):
                 new_agent._rebuild_graph()
+            skill_desc = f"专注于{'、'.join(skills)}" if skills else "通用"
             proxy = AgentProxy(
                 name=cfg.name, agent=new_agent,
                 skills=skills,
@@ -2609,6 +2861,11 @@ class CreateAgentRequest(BaseModel):
     provider: str = Field("deepseek", description="LLM 提供商")
     skills: list[str] = Field(default_factory=list, description="技能标签列表")
     description: str = Field("", description="Agent 描述")
+    system_prompt: str = Field("", description="自定义 System Prompt（空则自动生成）")
+    max_iterations: int = Field(15, ge=1, le=50, description="最大迭代次数 (1-50)")
+    enable_planning: bool = Field(False, description="启用计划模式")
+    enable_rag: bool = Field(True, description="启用 RAG 知识库")
+    enable_reflection: bool = Field(False, description="启用反思模式")
 
 
 @app.post("/api/agents/create")
@@ -2619,20 +2876,27 @@ async def api_create_agent(req: CreateAgentRequest, current_user = Depends(get_c
     if not req.name or not req.name.strip():
         return JSONResponse({"ok": False, "error": "Agent 名称不能为空"}, status_code=400)
 
+    # ── system_prompt: 优先用户自定义，否则自动生成 ──
+    sp = (req.system_prompt or "").strip()[:5000]
+    if not sp:
+        skill_desc = f"专注于{'、'.join(req.skills)}" if req.skills else "通用"
+        sp = f"你是 {req.name}，一个{skill_desc}的 AI 助手。请用你的专业知识高效完成用户的任务。"
+
     config = LLMConfig(provider=req.provider, model=req.model)
     new_agent = Agent()
     new_agent.name = req.name
-    skill_desc = f"专注于{'、'.join(req.skills)}" if req.skills else "通用"
-    new_agent.system_prompt = (
-        f"你是 {req.name}，一个{skill_desc}的 AI 助手。"
-        f"请用你的专业知识高效完成用户的任务。"
-    )
+    new_agent.system_prompt = sp
+    new_agent.max_iterations = req.max_iterations
+    new_agent.enable_planning = req.enable_planning
+    new_agent.enable_rag = req.enable_rag
+    new_agent.enable_reflection = req.enable_reflection
     new_agent.init(config)
     register_all(new_agent.tools)
     if hasattr(new_agent, '_rebuild_graph'):
         new_agent._rebuild_graph()
 
     tm = get_task_manager()
+    skill_desc = f"专注于{'、'.join(req.skills)}" if req.skills else "通用"
     proxy = AgentProxy(
         name=req.name,
         agent=new_agent,
@@ -2643,7 +2907,12 @@ async def api_create_agent(req: CreateAgentRequest, current_user = Depends(get_c
     tm.start_dispatcher()
 
     # 持久化到数据库
-    await _persist_agent_to_db(req.name, req.model, req.provider, req.skills, req.description or "")
+    await _persist_agent_to_db(
+        req.name, req.model, req.provider, req.skills, req.description or "",
+        system_prompt=sp, max_iterations=req.max_iterations,
+        enable_planning=req.enable_planning, enable_rag=req.enable_rag,
+        enable_reflection=req.enable_reflection,
+    )
 
     return {"ok": True, "agent_name": req.name, "model": req.model, "skills": req.skills}
 
@@ -3018,6 +3287,49 @@ def init_agent():
         max_iterations=agent_cfg.get("max_iterations", 15),
         verbose=agent_cfg.get("verbose", True),
     )
+
+    # ---- RAG 知识库初始化 ----
+    rag_cfg = cfg.get("rag", {})
+    if rag_cfg.get("enabled", False):
+        try:
+            from src.rag.knowledge_base import KnowledgeBase
+            _agent.knowledge = KnowledgeBase(
+                embedding_provider=rag_cfg.get("embedding_provider", "openai"),
+                embedding_model=rag_cfg.get("embedding_model", "text-embedding-3-small"),
+                chunk_size=int(rag_cfg.get("chunk_size", 500)),
+                chunk_overlap=int(rag_cfg.get("chunk_overlap", 50)),
+                persist_dir=str(rag_cfg.get("persist_dir", "./data/vectordb")),
+                top_k=int(rag_cfg.get("top_k", 5)),
+            )
+            # 预加载已上传的文件到知识库
+            upload_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "data", "uploads",
+            )
+            if os.path.isdir(upload_dir):
+                stats = _agent.knowledge.stats()
+                if stats.get("chunks", 0) == 0:
+                    # 知识库为空，批量导入已有文件
+                    loaded = 0
+                    for fname in os.listdir(upload_dir):
+                        fpath = os.path.join(upload_dir, fname)
+                        if not os.path.isfile(fpath):
+                            continue
+                        try:
+                            _agent.knowledge.add_file(fpath)
+                            loaded += 1
+                        except Exception:
+                            pass
+                    if loaded:
+                        logger.info(f"RAG 知识库已激活，预加载 {loaded} 个文件")
+            logger.info(
+                f"RAG 知识库已激活 "
+                f"(embedding: {rag_cfg.get('embedding_model')}, "
+                f"chunk: {rag_cfg.get('chunk_size')}/{rag_cfg.get('chunk_overlap')}, "
+                f"top_k: {rag_cfg.get('top_k')})"
+            )
+        except Exception as e:
+            logger.warning(f"RAG 知识库初始化失败: {e}")
 
     register_all(_agent.tools)
     # 工具注册后重建 graph，让 LangChain 感知到工具

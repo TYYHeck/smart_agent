@@ -4,7 +4,8 @@
 from __future__ import annotations
 import os
 from datetime import datetime
-from fastapi import APIRouter, Depends, JSONResponse, Response
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from src.auth.dependencies import get_current_user
@@ -232,8 +233,78 @@ async def api_commands():
             {"cmd": "/mode", "desc": "切换模式", "args": "<planning|rag|reflection>"},
             {"cmd": "/tools", "desc": "列出可用工具", "args": ""},
             {"cmd": "/status", "desc": "查看当前状态", "args": ""},
+            {"cmd": "/debug", "desc": "切换调试模式", "args": ""},
+            {"cmd": "/recall", "desc": "搜索长期记忆", "args": "<查询>"},
+            {"cmd": "/orchestrate", "desc": "多 Agent 编排", "args": "<子命令>"},
+            {"cmd": "/kb", "desc": "知识库管理", "args": "<子命令>"},
+            {"cmd": "/files", "desc": "输出文件管理", "args": "<子命令>"},
+            {"cmd": "/sysinfo", "desc": "系统信息", "args": ""},
+            {"cmd": "/config", "desc": "配置管理", "args": "<子命令>"},
         ],
     }
+
+
+# ── 工具详情 API (CLI /tools 对应) ──
+
+@system_router.get("/api/tools")
+async def api_tools(current_user = Depends(get_current_user)):
+    """列出所有已注册工具（含参数、描述、危险标记）"""
+    from ..web_server import get_agent
+    agent = get_agent()
+    tools = []
+    for tool in agent.tools.list_all():
+        tools.append({
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": list(tool.parameters.keys()),
+            "dangerous": tool.dangerous,
+        })
+    return {"ok": True, "tools": tools, "count": len(tools)}
+
+
+# ── 调试模式 API (CLI /debug 对应) ──
+
+@system_router.post("/api/toggle_debug")
+async def api_toggle_debug(current_user = Depends(get_current_user)):
+    """切换调试模式（显示 Agent 内部错误详情）"""
+    from ..web_server import get_agent
+    agent = get_agent()
+    if not hasattr(agent, '_debug'):
+        agent._debug = False
+    agent._debug = not agent._debug
+    return {"ok": True, "debug": agent._debug}
+
+
+# ── 记忆管理 API (CLI /clear /recall 对应) ──
+
+class RecallRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="搜索查询")
+    top_k: int = Field(5, ge=1, le=20, description="返回条数")
+
+
+@system_router.post("/api/memory/recall")
+async def api_memory_recall(req: RecallRequest, current_user = Depends(get_current_user)):
+    """搜索长期记忆"""
+    from ..web_server import get_agent
+    agent = get_agent()
+    try:
+        results = agent.memory.recall(req.query, top_k=req.top_k)
+        return {"ok": True, "results": results}
+    except Exception as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e)},
+            status_code=500,
+        )
+
+
+@system_router.post("/api/memory/clear")
+async def api_memory_clear(current_user = Depends(get_current_user)):
+    """清空短期对话记忆"""
+    from ..web_server import get_agent
+    agent = get_agent()
+    agent.memory.short.clear()
+    agent.memory.set_system(agent._build_system_prompt())
+    return {"ok": True, "message": "短期记忆已清空"}
 
 
 @system_router.get("/api/dashboard/stats")
@@ -248,6 +319,14 @@ async def api_dashboard_stats(current_user = Depends(get_current_user)):
     process = psutil.Process()
     mem = process.memory_info()
 
+    # 知识库统计
+    kb_stats = {}
+    if _agent and _agent.knowledge:
+        try:
+            kb_stats = _agent.knowledge.stats()
+        except Exception:
+            kb_stats = {"chunks": 0, "sources": 0}
+
     return {
         "ok": True,
         "agent_name": _agent.name if _agent else "N/A",
@@ -258,4 +337,11 @@ async def api_dashboard_stats(current_user = Depends(get_current_user)):
         "registered_agents": len(agents),
         "memory_mb": round(mem.rss / 1024 / 1024, 2),
         "storage": "MySQL" if _db_initialized else "内存",
+        "langchain": _agent._agent_graph is not None if _agent else False,
+        "planning": _agent.enable_planning if _agent else False,
+        "rag": _agent.enable_rag if _agent else False,
+        "reflection": _agent.enable_reflection if _agent else False,
+        "knowledge_chunks": kb_stats.get("chunks", 0),
+        "knowledge_sources": kb_stats.get("sources", 0),
+        "debug": getattr(_agent, '_debug', False) if _agent else False,
     }

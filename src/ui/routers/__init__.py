@@ -25,6 +25,7 @@ from .chat import router as chat_router
 from .tasks import router as tasks_router
 from .agents import router as agents_router
 from .files import router as files_router
+from .knowledge import router as knowledge_router
 from .system import system_router, config_router, model_router
 
 all_routers = [
@@ -33,6 +34,7 @@ all_routers = [
     tasks_router,
     agents_router,
     files_router,
+    knowledge_router,
     system_router,
     config_router,
     model_router,

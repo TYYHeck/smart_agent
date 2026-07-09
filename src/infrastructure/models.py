@@ -150,6 +150,11 @@ class AgentConfigModel(Base):
     provider = Column(String(32), default="deepseek")
     skills = Column(JSON, default=list)
     description = Column(String(512), default="")
+    system_prompt = Column(Text, default="")
+    max_iterations = Column(Integer, default=15)
+    enable_planning = Column(Boolean, default=False)
+    enable_rag = Column(Boolean, default=True)
+    enable_reflection = Column(Boolean, default=False)
     status = Column(String(16), default="idle")
     current_task_id = Column(String(32), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -162,6 +167,11 @@ class AgentConfigModel(Base):
             "provider": self.provider,
             "skills": self.skills or [],
             "description": self.description,
+            "system_prompt": self.system_prompt,
+            "max_iterations": self.max_iterations,
+            "enable_planning": self.enable_planning,
+            "enable_rag": self.enable_rag,
+            "enable_reflection": self.enable_reflection,
             "status": self.status,
             "current_task_id": self.current_task_id,
         }

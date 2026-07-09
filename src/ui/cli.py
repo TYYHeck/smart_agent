@@ -112,6 +112,22 @@ class _CommandCompleter(Completer):
                 return CLI.AGENT_SUB
             if tokens[1] == "create":
                 return self._agent_create_opts(tokens)
+            if tokens[1] in ("update", "delete"):
+                return self._get_agent_names()
+
+        # ── /orchestrate 子命令 ──
+        if first == "/orchestrate":
+            if len(tokens) == 1:
+                return CLI.ORCH_SUB
+            if len(tokens) == 2 and tokens[1] not in CLI.ORCH_SUB:
+                return CLI.ORCH_SUB
+
+        # ── /kb 子命令 ──
+        if first == "/kb":
+            if len(tokens) == 1:
+                return CLI.KB_SUB
+            if len(tokens) == 2 and tokens[1] not in CLI.KB_SUB:
+                return CLI.KB_SUB
 
         # ── /recall → 不补全（自由文本）──
         if first == "/recall":
@@ -182,6 +198,11 @@ def _create_side_agent(
     provider: str = "deepseek",
     skills: list[str] | None = None,
     description: str = "",
+    system_prompt: str = "",
+    max_iterations: int = 15,
+    enable_planning: bool = False,
+    enable_rag: bool = True,
+    enable_reflection: bool = False,
 ):
     """创建并注册一个独立 Agent 到 TaskManager"""
     from src.core.task_manager import get_task_manager, AgentProxy
@@ -191,12 +212,17 @@ def _create_side_agent(
     agent = Agent()
     agent.name = name
 
-    # 根据技能构建专门的 system_prompt
-    skill_desc = f"专注于{'、'.join(skills)}" if skills else "通用"
-    agent.system_prompt = (
-        f"你是 {name}，一个{skill_desc}的 AI 助手。"
-        f"请用你的专业知识高效完成用户的任务。"
-    )
+    # ── system_prompt: 优先用户自定义，否则自动生成 ──
+    sp = (system_prompt or "").strip()[:5000]
+    if not sp:
+        skill_desc = f"专注于{'、'.join(skills)}" if skills else "通用"
+        sp = f"你是 {name}，一个{skill_desc}的 AI 助手。请用你的专业知识高效完成用户的任务。"
+    agent.system_prompt = sp
+
+    agent.max_iterations = max(1, min(max_iterations, 50))
+    agent.enable_planning = enable_planning
+    agent.enable_rag = enable_rag
+    agent.enable_reflection = enable_reflection
     agent.init(config)
 
     # 注册内置工具
@@ -205,6 +231,7 @@ def _create_side_agent(
     agent._rebuild_graph()
 
     tm = get_task_manager()
+    skill_desc = f"专注于{'、'.join(skills)}" if skills else "通用"
     proxy = AgentProxy(
         name=name,
         agent=agent,
@@ -274,6 +301,14 @@ class _ReadlineCompleter:
             if len(tokens) == 2 and tokens[1] not in CLI.AGENT_SUB:
                 return CLI.AGENT_SUB
 
+        if first == "/orchestrate":
+            if len(tokens) == 1:
+                return CLI.ORCH_SUB
+
+        if first == "/kb":
+            if len(tokens) == 1:
+                return CLI.KB_SUB
+
         if first == "/model" and len(tokens) <= 2:
             try:
                 models = self.cli.agent.available_models()
@@ -300,9 +335,12 @@ class CLI:
         "/plan", "/rag", "/reflect",
         "/recall", "/kb_stats", "/model",
         "/task", "/agent",
+        "/orchestrate", "/kb", "/files", "/sysinfo", "/config",
     ]
     TASK_SUB = ["publish", "list", "status", "queue", "cancel"]
-    AGENT_SUB = ["list", "register", "unregister", "create"]
+    AGENT_SUB = ["list", "register", "unregister", "create", "update", "delete", "cleanup"]
+    KB_SUB = ["upload", "search", "files", "delete", "clear"]
+    ORCH_SUB = ["run", "detect", "modes"]
 
     def __init__(self, agent: Agent):
         self.agent = agent
@@ -536,6 +574,21 @@ class CLI:
         elif command == "/agent":
             self._handle_agent_command(parts)
 
+        elif command == "/orchestrate":
+            self._handle_orchestrate_command(parts)
+
+        elif command == "/kb":
+            self._handle_kb_command(parts)
+
+        elif command == "/files":
+            self._handle_files_command(parts)
+
+        elif command == "/sysinfo":
+            self._handle_sysinfo_command()
+
+        elif command == "/config":
+            self._handle_config_command(parts)
+
         else:
             print(f"未知命令: {command}，输入 /help 查看帮助")
 
@@ -668,9 +721,15 @@ class CLI:
 
         if len(parts) < 2:
             print("用法:")
-            print("  /agent list         列出所有 Agent")
-            print("  /agent register     注册当前 Agent 到任务管理器")
-            print("  /agent unregister   注销当前 Agent")
+            print("  /agent list            列出所有 Agent")
+            print("  /agent register        注册当前 Agent 到任务管理器")
+            print("  /agent unregister      注销当前 Agent")
+            print("  /agent create <名称> <模型> [provider] [--skills <技能>] [--prompt <提示词>]")
+            print("                         创建新 Agent")
+            print("  /agent update <名称> --skills <技能> [--desc <描述>] [--prompt <提示词>]")
+            print("                         更新 Agent 配置")
+            print("  /agent delete <名称>   删除 Agent")
+            print("  /agent cleanup         清理无效 Agent")
             return
 
         sub = parts[1].lower()
@@ -695,9 +754,10 @@ class CLI:
 
         elif sub == "create":
             if len(parts) < 4:
-                print("用法: /agent create <名称> <模型> [provider] [--skills <技能1,技能2>]")
+                print("用法: /agent create <名称> <模型> [provider] [--skills <技能1,技能2>] [--prompt <自定义提示词>]")
                 print("示例: /agent create 编码师 gpt-4o openai --skills coding,shell")
                 print("      /agent create 研究员 deepseek-chat --skills research,writing")
+                print("      /agent create 客服 deepseek-chat --prompt '你是一个专业客服，语气温和耐心'")
                 print()
                 print("可用技能标签: coding, research, writing, data, file_ops, shell")
                 return
@@ -708,26 +768,381 @@ class CLI:
             remaining = parts[4:]
             provider = self.agent.llm.provider if self.agent.llm else "deepseek"
             skills: list[str] = []
+            prompt = ""
 
             i = 0
             while i < len(remaining):
                 if remaining[i] == "--skills" and i + 1 < len(remaining):
                     skills = [s.strip() for s in remaining[i + 1].split(",")]
                     i += 2
-                elif remaining[i] not in ("--skills",):
+                elif remaining[i] == "--prompt" and i + 1 < len(remaining):
+                    prompt = remaining[i + 1]
+                    i += 2
+                elif remaining[i] not in ("--skills", "--prompt"):
                     provider = remaining[i]
                     i += 1
                 else:
                     i += 1
 
             _create_side_agent(agent_name, model, provider, skills=skills,
-                               description=f"{'、'.join(skills)}型 Agent" if skills else "通用型 Agent")
+                               description=f"{'、'.join(skills)}型 Agent" if skills else "通用型 Agent",
+                               system_prompt=prompt)
             skill_str = f", 技能: {', '.join(skills)}" if skills else ""
-            print(f"[Agent] 已创建并注册: {agent_name} (模型: {model}, 供应商: {provider}{skill_str})")
+            prompt_str = ", 自定义Prompt" if prompt else ""
+            print(f"[Agent] 已创建并注册: {agent_name} (模型: {model}, 供应商: {provider}{skill_str}{prompt_str})")
 
         elif sub == "unregister":
             tm.unregister_agent(self.agent.name)
             print(f"[Agent] 已注销: {self.agent.name}")
+
+        elif sub == "update" and len(parts) > 2:
+            name = parts[2]
+            if name not in tm._agents:
+                print(f"[Agent] Agent 不存在: {name}")
+                return
+            remaining = parts[3:]
+            skills = None
+            description = None
+            prompt = None
+            i = 0
+            while i < len(remaining):
+                if remaining[i] == "--skills" and i + 1 < len(remaining):
+                    skills = [s.strip() for s in remaining[i + 1].split(",")]
+                    i += 2
+                elif remaining[i] == "--desc" and i + 1 < len(remaining):
+                    description = remaining[i + 1]
+                    i += 2
+                elif remaining[i] == "--prompt" and i + 1 < len(remaining):
+                    prompt = remaining[i + 1]
+                    i += 2
+                else:
+                    i += 1
+            proxy = tm._agents[name]
+            agent_obj = proxy.agent
+            if skills is not None:
+                proxy.skills = skills
+            if description is not None:
+                proxy.description = description
+            if prompt is not None:
+                sp = prompt.strip()[:5000]
+                if not sp:
+                    skill_desc = f"专注于{'、'.join(proxy.skills)}" if proxy.skills else "通用"
+                    sp = f"你是 {name}，一个{skill_desc}的 AI 助手。请用你的专业知识高效完成用户的任务。"
+                agent_obj.system_prompt = sp
+                if hasattr(agent_obj, '_rebuild_graph'):
+                    agent_obj._rebuild_graph()
+            print(f"[Agent] 已更新: {name}")
+
+        elif sub == "delete" and len(parts) > 2:
+            name = parts[2]
+            if name not in tm._agents:
+                print(f"[Agent] Agent 不存在: {name}")
+                return
+            tm.unregister_agent(name)
+            print(f"[Agent] 已删除: {name}")
+
+        elif sub == "cleanup":
+            removed = []
+            for aname in list(tm._agents.keys()):
+                if not aname or not aname.strip():
+                    tm.unregister_agent(aname)
+                    removed.append(repr(aname))
+            print(f"[Agent] 已清理 {len(removed)} 个无效 Agent")
+
+    def _handle_orchestrate_command(self, parts: list[str]):
+        """处理 /orchestrate 命令 —— 多 Agent 编排执行"""
+        from src.core.task_manager import get_task_manager
+        from src.core.orchestrator import patch_task_manager, ExecutionMode
+        tm = get_task_manager()
+
+        if len(parts) < 2:
+            print("用法:")
+            print("  /orchestrate run <描述> [--mode <模式>] [--agents <名称1,名称2>]")
+            print("  /orchestrate detect <描述>      检测最佳执行模式")
+            print("  /orchestrate modes               列出所有编排模式")
+            print()
+            print("模式: single / parallel / pipeline / collaborative / auto")
+            return
+
+        sub = parts[1].lower()
+
+        if sub == "modes":
+            for m in ExecutionMode:
+                desc = {
+                    ExecutionMode.SINGLE: "单 Agent 执行，适合简单问答",
+                    ExecutionMode.PARALLEL: "多 Agent 并行执行，结果汇总",
+                    ExecutionMode.PIPELINE: "Agent 串行接力，适合多步骤流程",
+                    ExecutionMode.COLLABORATIVE: "Agent 团队讨论互审",
+                    ExecutionMode.AUTO: "系统自动选择最优模式",
+                }.get(m, "")
+                print(f"  {m.value:15s} {desc}")
+
+        elif sub == "detect" and len(parts) > 2:
+            desc = " ".join(parts[2:])
+            if not hasattr(tm, 'detect_best_mode'):
+                patch_task_manager(tm)
+            detection = tm.detect_best_mode(desc)
+            print(f"[Orchestrate] 任务分析: {desc[:80]}...")
+            print(f"  推荐模式: {detection.get('mode', 'single').upper()}")
+            print(f"  原因: {detection.get('reason', 'N/A')}")
+
+        elif sub == "run" and len(parts) > 2:
+            # 解析参数
+            remaining = parts[2:]
+            mode = "auto"
+            agent_names = None
+            i = 0
+            desc_parts = []
+            while i < len(remaining):
+                if remaining[i] == "--mode" and i + 1 < len(remaining):
+                    mode = remaining[i + 1]
+                    i += 2
+                elif remaining[i] == "--agents" and i + 1 < len(remaining):
+                    agent_names = [n.strip() for n in remaining[i + 1].split(",")]
+                    i += 2
+                else:
+                    desc_parts.append(remaining[i])
+                    i += 1
+            desc = " ".join(desc_parts)
+
+            if not hasattr(tm, 'execute_orchestrated'):
+                patch_task_manager(tm)
+
+            print(f"[Orchestrate] 启动编排执行...")
+            print(f"  任务: {desc[:80]}...")
+            print(f"  模式: {mode}")
+            if agent_names:
+                print(f"  Agent: {', '.join(agent_names)}")
+            print(f"  (使用 /task status <id> 查看结果)")
+            print()
+
+            try:
+                result = tm.execute_orchestrated(
+                    description=desc,
+                    title=desc[:50],
+                    mode=mode,
+                    agent_names=agent_names,
+                )
+                if result.success:
+                    print(f"[Orchestrate] 执行完成!")
+                    print(f"  模式: {result.mode.value}")
+                    print(f"  参与 Agent: {', '.join(result.agents_used)}")
+                    if result.final_result:
+                        self._print_response(result.final_result[:2000])
+                else:
+                    print(f"[Orchestrate] 执行失败: {result.error}")
+            except Exception as e:
+                print(f"[Orchestrate] 执行异常: {e}")
+
+    def _handle_kb_command(self, parts: list[str]):
+        """处理 /kb 命令 —— 知识库管理"""
+        if self.agent.knowledge is None:
+            print("[KB] 知识库未启用，请在 config.yaml 中设置 rag.enabled: true")
+            return
+
+        if len(parts) < 2:
+            print("用法:")
+            print("  /kb upload <文件路径>    上传文件到知识库")
+            print("  /kb search <查询> [top_k] 语义搜索知识库")
+            print("  /kb files               列出已上传文件")
+            print("  /kb delete <source_id>  删除指定来源")
+            print("  /kb clear               清空知识库")
+            return
+
+        sub = parts[1].lower()
+
+        if sub == "upload" and len(parts) > 2:
+            path = parts[2]
+            if not os.path.exists(path):
+                print(f"[KB] 文件不存在: {path}")
+                return
+            try:
+                from src.rag.document_loader import DocumentLoader
+                loader = DocumentLoader()
+                text = loader.load(path)
+                source_id = os.path.basename(path)
+                count = self.agent.knowledge.add_document(text, source_id=source_id)
+                print(f"[KB] 已添加: {source_id} → {count} 个文档块")
+            except Exception as e:
+                print(f"[KB] 上传失败: {e}")
+
+        elif sub == "search" and len(parts) > 2:
+            top_k = 5
+            if len(parts) > 3 and parts[3].isdigit():
+                top_k = int(parts[3])
+            query = " ".join(parts[2:]).split(str(top_k))[0].strip() if len(parts) > 3 and parts[3].isdigit() else " ".join(parts[2:])
+            results = self.agent.knowledge.search(query, top_k=top_k)
+            if results:
+                print(f"\n[KB] 检索结果 (top {len(results)}):")
+                for i, r in enumerate(results, 1):
+                    src = r.get("source", "?")
+                    score = r.get("score", 0)
+                    text = r.get("text", "")[:150]
+                    print(f"  {i}. [{src}] (score: {score:.3f})")
+                    print(f"     {text}...")
+                print()
+            else:
+                print("[KB] 没有找到相关文档")
+
+        elif sub == "files":
+            stats = self.agent.knowledge.stats()
+            sources = stats.get("sources_list", [])
+            if sources:
+                print(f"\n[KB] 已上传文件 ({len(sources)} 个):")
+                for s in sources:
+                    print(f"  - {s}")
+                print()
+            else:
+                print("[KB] 暂无已上传文件")
+
+        elif sub == "delete" and len(parts) > 2:
+            source_id = parts[2]
+            try:
+                self.agent.knowledge.delete_source(source_id)
+                print(f"[KB] 已删除来源: {source_id}")
+            except Exception as e:
+                print(f"[KB] 删除失败: {e}")
+
+        elif sub == "clear":
+            if len(parts) > 2 and parts[2] == "--force":
+                self.agent.knowledge.clear()
+                print("[KB] 知识库已清空")
+            else:
+                print("[KB] 确认清空? 使用 /kb clear --force 确认")
+
+    def _handle_files_command(self, parts: list[str]):
+        """处理 /files 命令 —— 输出文件管理"""
+        import os as _os
+        from src.core.config import get_config, load_config
+
+        try:
+            cfg = get_config()
+        except RuntimeError:
+            cfg = load_config()
+        output_dir = _os.path.abspath(cfg.tools.output_dir)
+
+        if not _os.path.isdir(output_dir):
+            print(f"[Files] 输出目录不存在: {output_dir}")
+            return
+
+        if len(parts) < 2 or parts[1].lower() == "list":
+            files = []
+            for root, dirs, filenames in _os.walk(output_dir):
+                for fname in filenames:
+                    fpath = _os.path.join(root, fname)
+                    rel = _os.path.relpath(fpath, output_dir)
+                    try:
+                        size = _os.path.getsize(fpath)
+                    except OSError:
+                        size = 0
+                    files.append((rel, size))
+            files.sort(key=lambda x: x[0])
+
+            if not files:
+                print("[Files] 暂无输出文件")
+            else:
+                print(f"\n[Files] 输出文件 ({len(files)} 个):")
+                for f, s in files:
+                    s_str = f"{s}B" if s < 1024 else f"{s/1024:.1f}KB" if s < 1024*1024 else f"{s/1024/1024:.1f}MB"
+                    print(f"  {f:50s} {s_str:>10s}")
+                print()
+
+        elif parts[1].lower() == "preview" and len(parts) > 2:
+            fname = parts[2]
+            fpath = _os.path.join(output_dir, fname) if not _os.path.isabs(fname) else fname
+            if not _os.path.isfile(fpath):
+                print(f"[Files] 文件不存在: {fname}")
+                return
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    content = f.read()
+                if self.console:
+                    from rich.syntax import Syntax
+                    ext = _os.path.splitext(fname)[1].lstrip(".")
+                    lang_map = {"py":"python","js":"javascript","ts":"typescript","json":"json",
+                               "md":"markdown","yaml":"yaml","yml":"yaml","html":"html",
+                               "css":"css","sql":"sql","sh":"bash"}
+                    lang = lang_map.get(ext, "text")
+                    syntax = Syntax(content[:5000], lang, line_numbers=True)
+                    self.console.print(syntax)
+                else:
+                    print(content[:5000])
+            except UnicodeDecodeError:
+                print(f"[Files] 二进制文件不支持预览: {fname}")
+
+    def _handle_sysinfo_command(self):
+        """处理 /sysinfo 命令 —— 系统信息"""
+        import platform
+        import psutil
+        from datetime import datetime
+
+        process = psutil.Process()
+        mem = process.memory_info()
+
+        db_status = "disabled"
+        try:
+            from src.infrastructure.database import is_db_available
+            db_status = "connected" if is_db_available() else "disabled"
+        except Exception:
+            pass
+
+        print(f"\n--- 系统信息 ---")
+        print(f"  Python:    {platform.python_version()}")
+        print(f"  平台:      {platform.platform()}")
+        print(f"  CPU 核心:  {psutil.cpu_count()}")
+        print(f"  内存使用:  {mem.rss / 1024 / 1024:.1f} MB")
+        uptime = round((datetime.now() - datetime.fromtimestamp(process.create_time())).total_seconds())
+        print(f"  运行时间:  {uptime}s ({uptime//3600}h {uptime%3600//60}m)")
+        print(f"  数据库:    {db_status}")
+        print(f"  Agent:     {self.agent.name}")
+        if self.agent.llm:
+            print(f"  模型:      {self.agent.llm.config.model}")
+            print(f"  供应商:    {self.agent.llm.config.provider}")
+        print(f"  工具数:    {len(self.agent.tools)}")
+        print()
+
+    def _handle_config_command(self, parts: list[str]):
+        """处理 /config 命令 —— 配置读写"""
+        import yaml
+
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "config.yaml",
+        )
+
+        if not os.path.exists(config_path):
+            print("[Config] config.yaml 不存在")
+            return
+
+        with open(config_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+
+        if len(parts) < 2 or parts[1].lower() == "show":
+            print(f"\n--- 当前配置 ---")
+            for section, values in cfg.items():
+                if isinstance(values, dict):
+                    print(f"  [{section}]")
+                    for k, v in values.items():
+                        # 隐藏敏感信息
+                        display_v = "***" if "key" in k.lower() or "password" in k.lower() or "secret" in k.lower() else v
+                        print(f"    {k}: {display_v}")
+                else:
+                    print(f"  {section}: {values}")
+            print()
+
+        elif parts[1].lower() == "get" and len(parts) > 2:
+            key = parts[2]
+            keys = key.split(".")
+            val = cfg
+            for k in keys:
+                val = val.get(k, {}) if isinstance(val, dict) else None
+            if val is not None and not isinstance(val, dict):
+                print(f"[Config] {key} = {val}")
+            elif isinstance(val, dict):
+                for k, v in val.items():
+                    print(f"  {k}: {v}")
+            else:
+                print(f"[Config] 未找到: {key}")
 
     def _show_help(self):
         help_text = """
@@ -743,6 +1158,7 @@ class CLI:
           /tools              列出所有已注册工具
           /stats              显示运行统计
           /kb_stats           知识库统计
+          /sysinfo            显示系统信息 (CPU/内存/运行时间)
 
         模式切换:
           /plan               切换任务计划模式
@@ -763,12 +1179,37 @@ class CLI:
           /task queue            查看队列状态
           /task cancel <id>      取消任务
 
+        多 Agent 编排:
+          /orchestrate run <描述> [--mode <模式>] [--agents <名称>]
+                                 多 Agent 编排执行任务
+          /orchestrate detect <描述>  检测最佳执行模式
+          /orchestrate modes          列出所有编排模式
+
         Agent 管理:
-          /agent list            列出所有 Agent (含技能标签)
+          /agent list            列出所有 Agent
           /agent register        注册当前 Agent
           /agent unregister      注销当前 Agent
-          /agent create <名称> <模型> [provider] [--skills <技能>]
-                                 创建新 Agent (支持技能标签)
+          /agent create <名称> <模型> [provider] [--skills <技能>] [--prompt <提示词>]
+                                 创建新 Agent
+          /agent update <名称> --skills <技能> [--desc <描述>] [--prompt <提示词>]
+                                 更新 Agent 配置
+          /agent delete <名称>   删除 Agent
+          /agent cleanup         清理无效 Agent
+
+        知识库管理:
+          /kb upload <文件>      上传文件到知识库
+          /kb search <查询>      语义搜索知识库
+          /kb files              列出已上传文件
+          /kb delete <来源>      删除指定来源
+          /kb clear --force      清空知识库
+
+        文件管理:
+          /files list            列出输出文件
+          /files preview <名称>  预览文本文件
+
+        配置管理:
+          /config show           查看当前配置
+          /config get <键>       查看指定配置项
         """
         print(help_text)
 

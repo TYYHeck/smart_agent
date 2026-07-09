@@ -2,7 +2,8 @@
 """认证路由 —— 登录/注册/用户信息"""
 
 from __future__ import annotations
-from fastapi import APIRouter, Depends, JSONResponse
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src.auth.dependencies import get_current_user

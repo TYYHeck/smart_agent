@@ -109,12 +109,18 @@ class AgentProxy:
     description: str = ""                                  # 一句话描述
 
     def to_dict(self) -> dict:
+        has_prompt = bool(getattr(self.agent, 'system_prompt', None))
         return {
             "name": self.name,
             "status": self.status,
             "current_task_id": self.current_task_id,
             "skills": self.skills,
             "description": self.description,
+            "has_custom_prompt": has_prompt and not self.agent.system_prompt.startswith(f"你是 {self.name}"),
+            "max_iterations": getattr(self.agent, 'max_iterations', 15),
+            "enable_planning": getattr(self.agent, 'enable_planning', False),
+            "enable_rag": getattr(self.agent, 'enable_rag', True),
+            "enable_reflection": getattr(self.agent, 'enable_reflection', False),
         }
 
 
