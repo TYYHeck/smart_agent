@@ -3353,6 +3353,7 @@ def _try_parse_dt(val) -> Optional[datetime]:
 
 async def _load_history_async():
     """异步加载历史任务（复用数据库 loop）"""
+    import logging as _logging
     from src.infrastructure.task_repo import get_task_repo
     repo = get_task_repo()
     if not repo.db_enabled:
@@ -3383,7 +3384,7 @@ async def _load_history_async():
             tm._history.append(task)
             count += 1
     if count > 0:
-        logging.getLogger("smart_agent.web").info(f"从数据库恢复了 {count} 个历史任务")
+        _logging.getLogger("smart_agent.web").info(f"从数据库恢复了 {count} 个历史任务")
 
 
 def start(host: str = "127.0.0.1", port: int = 8080):

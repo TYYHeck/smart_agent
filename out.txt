@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import sys; sys.path.insert(0, '.'); from src.ui.web_server import app; print('OK')
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "g:\Documents\Agents_Projetcts\smart_agent\src\ui\web_server.py", line 29, in <module>
+    from src.auth.dependencies import get_current_user, get_optional_user, get_current_admin
+  File "g:\Documents\Agents_Projetcts\smart_agent\src\auth\__init__.py", line 11, in <module>
+    from jose import JWTError, jwt
+ModuleNotFoundError: No module named 'jose'

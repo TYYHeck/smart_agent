@@ -123,7 +123,7 @@ async def run_migrations(engine: AsyncEngine):
 async def _ensure_agent_configs_columns(engine: AsyncEngine):
     """确保 agent_configs 表包含所有必需列（逐列检查，兼容 MySQL 5.7+ / MariaDB）"""
     required = [
-        ("system_prompt", "TEXT", "''"),
+        ("system_prompt", "TEXT", None),  # TEXT 列在严格模式下不能设 DEFAULT
         ("max_iterations", "INT", "15"),
         ("enable_planning", "BOOLEAN", "FALSE"),
         ("enable_rag", "BOOLEAN", "TRUE"),
@@ -141,7 +141,10 @@ async def _ensure_agent_configs_columns(engine: AsyncEngine):
                 result = await conn.execute(check, {"col": col_name})
                 count = result.scalar()
                 if count == 0:
-                    stmt = f"ALTER TABLE agent_configs ADD COLUMN {col_name} {col_type} DEFAULT {col_default}"
+                    if col_default is not None:
+                        stmt = f"ALTER TABLE agent_configs ADD COLUMN {col_name} {col_type} DEFAULT {col_default}"
+                    else:
+                        stmt = f"ALTER TABLE agent_configs ADD COLUMN {col_name} {col_type}"
                     await conn.execute(text(stmt))
                     logger.info(f"已添加列: agent_configs.{col_name}")
             except Exception as e:
