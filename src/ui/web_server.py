@@ -15,8 +15,16 @@ import os
 import json
 import asyncio
 import uuid
+import warnings
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+
+# 屏蔽 Python 3.11+ Task.cancel(msg=...) 的 DeprecationWarning 刷屏
+# (uvicorn/anyio 传递 msg 参数到 asyncio.Task.cancel() 已在 3.11 废弃)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="anyio")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="starlette")
+warnings.filterwarnings("ignore", message=".*msg.*argument to (Task|Future)\\.cancel.*", category=DeprecationWarning)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 

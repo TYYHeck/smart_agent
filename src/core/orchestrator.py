@@ -319,6 +319,14 @@ class Orchestrator:
             task.finished_at = datetime.now()
             _current_task_id.reset(prev_task_id)  # 恢复上下文
 
+            # ── 释放所有参与 Agent，恢复 idle ──
+            for a in agents:
+                try:
+                    a.status = "idle"
+                    a.current_task_id = None
+                except Exception:
+                    pass
+
             # ── 先发送完成信号（必须在持久化之前，确前端无论持久化成败都收到完成通知）──
             self._emit_progress(on_progress, "orchestration_complete", {
                 "task_id": task.id,

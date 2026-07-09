@@ -388,41 +388,5 @@ async def api_memory_clear(current_user = Depends(get_current_user)):
     return {"ok": True, "message": "短期记忆已清空"}
 
 
-@system_router.get("/api/dashboard/stats")
-async def api_dashboard_stats(current_user = Depends(get_current_user)):
-    from ..web_server import _agent, _db_initialized
-    import psutil
-
-    tm = get_task_manager()
-    queue = tm.queue_status()
-    agents = tm.list_agents()
-
-    process = psutil.Process()
-    mem = process.memory_info()
-
-    # 知识库统计
-    kb_stats = {}
-    if _agent and _agent.knowledge:
-        try:
-            kb_stats = _agent.knowledge.stats()
-        except Exception:
-            kb_stats = {"chunks": 0, "sources": 0}
-
-    return {
-        "ok": True,
-        "agent_name": _agent.name if _agent else "N/A",
-        "model": _agent.llm.config.model if _agent and _agent.llm else "N/A",
-        "tools": len(_agent.tools) if _agent else 0,
-        "pending_tasks": queue["pending"],
-        "running_tasks": queue["running"],
-        "registered_agents": len(agents),
-        "memory_mb": round(mem.rss / 1024 / 1024, 2),
-        "storage": "MySQL" if _db_initialized else "内存",
-        "langchain": _agent._agent_graph is not None if _agent else False,
-        "planning": _agent.enable_planning if _agent else False,
-        "rag": _agent.enable_rag if _agent else False,
-        "reflection": _agent.enable_reflection if _agent else False,
-        "knowledge_chunks": kb_stats.get("chunks", 0),
-        "knowledge_sources": kb_stats.get("sources", 0),
-        "debug": getattr(_agent, '_debug', False) if _agent else False,
-    }
+# /api/dashboard/stats 端点已移至 web_server.py (返回格式与前端匹配)
+# 此处不再注册，避免路径冲突导致仪表盘无数据
