@@ -434,6 +434,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
     <div class="input-area">
       <div class="slash-dropdown" id="slashDropdown"></div>
       <textarea id="input" placeholder="输入消息，/ 查看命令，Enter 发送，Shift+Enter 换行" rows="1" oninput="autoResize(this)"></textarea>
+      <label class="btn btn-outline" style="cursor:pointer;padding:8px 12px;margin-right:6px;" title="上传文件">📎<input type="file" id="chatFileInput" style="display:none;" onchange="uploadChatFile(this)"></label>
       <button id="sendBtn" onclick="sendMessage()">发送</button>
     </div>
   </div>
@@ -460,6 +461,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
           <option value="pipeline">🔗 流水线</option>
           <option value="collaborative">🤝 协作讨论</option>
         </select>
+        <label class="btn btn-outline btn-sm" style="cursor:pointer;" title="上传附件">📎<input type="file" id="taskFileInput" style="display:none;" onchange="uploadTaskFile(this)" multiple></label>
         <button onclick="publishTask()" id="publishBtn">发布任务</button>
       </div>
       <!-- 编排实时面板 -->
@@ -634,6 +636,56 @@ function getCodeLang(filepath) {
                rs:'language-rust',cpp:'language-cpp',c:'language-c',rb:'language-ruby',
                php:'language-php',swift:'language-swift',kt:'language-kotlin'};
   return map[ext] || '';
+}
+
+// ==================== 文件上传 ====================
+let chatUploadedFiles = [];  // 对话中已上传的文件路径列表
+
+async function uploadFiles(files, onSuccess) {
+  for (const f of files) {
+    const formData = new FormData();
+    formData.append('file', f);
+    try {
+      const resp = await fetch('/api/files/upload', {
+        method: 'POST',
+        body: formData,
+        headers: apiHeaders()
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        if (onSuccess) onSuccess(data);
+      } else {
+        alert('上传失败: ' + (data.detail || '未知错误'));
+      }
+    } catch (e) { alert('上传出错: ' + e.message); }
+  }
+}
+
+function uploadChatFile(input) {
+  if (!input.files || input.files.length === 0) return;
+  uploadFiles(input.files, (data) => {
+    chatUploadedFiles.push(data.path);
+    addBubble('user', '📎 已上传: ' + data.filename + ' (' + formatSize(data.size) + ')');
+    scrollBottom();
+  });
+  input.value = '';
+}
+
+function uploadTaskFile(input) {
+  if (!input.files || input.files.length === 0) return;
+  uploadFiles(input.files, (data) => {
+    const taskInput = $('taskInput');
+    const existing = taskInput.value.trim();
+    const fileHint = '\n[附件: ' + data.path + ']';
+    taskInput.value = existing ? existing + fileHint : '请处理附件文件: ' + data.path;
+  });
+  input.value = '';
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/1024/1024).toFixed(1) + ' MB';
 }
 
 // ==================== 模态框 ====================
@@ -941,11 +993,19 @@ async function sendMessage() {
   const text = inputEl.value.trim();
   if(!text||isStreaming) return;
   addBubble('user', text); inputEl.value=''; inputEl.style.height='auto'; slashDropdown.classList.remove('show');
+
+  // 拼接上传文件上下文
+  let messageWithFiles = text;
+  if (chatUploadedFiles.length > 0) {
+    messageWithFiles += '\n\n[用户上传的文件: ' + chatUploadedFiles.join(', ') + ']';
+    chatUploadedFiles = [];
+  }
+
   isStreaming=true; sendBtn.disabled=true;
   currentAgentBubble = addBubble('agent','<div class="typing-indicator"><span></span><span></span><span></span></div>','agent-msg');
   currentToolCards = {}; let fullText='';
   try {
-    const resp = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json',...apiHeaders()},body:JSON.stringify({message:text})});
+    const resp = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json',...apiHeaders()},body:JSON.stringify({message:messageWithFiles})});
     const reader = resp.body.getReader(); const decoder = new TextDecoder();
     while(true) {
       const {done,value} = await reader.read(); if(done) break;
@@ -2110,6 +2170,7 @@ function startAutoRefresh() {
     if (!activeTab) return;
     if (activeTab.id === 'tab-dashboard') loadDashboard();
     else if (activeTab.id === 'tab-tasks') refreshTasks(currentTaskFilter);
+    else if (activeTab.id === 'tab-agents') loadAgents();
   }, 3000);
 }
 function stopAutoRefresh() {

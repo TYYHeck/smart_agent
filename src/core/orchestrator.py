@@ -261,6 +261,11 @@ class Orchestrator:
 
         result.agents_used = [a.name for a in agents]
 
+        # 标记所有参与 Agent 为 busy（仪表盘可实时看到状态变更）
+        for a in agents:
+            a.status = "busy"
+            a.current_task_id = task.id
+
         # 更新元数据中的实际 Agent 列表
         task.metadata["orchestration_agents"] = result.agents_used
 

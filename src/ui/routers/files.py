@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""文件管理路由 —— 列表/下载/预览"""
+"""文件管理路由 —— 上传/列表/下载/预览"""
 
 from __future__ import annotations
 import os
 import mimetypes
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
 from src.auth.dependencies import get_current_user
@@ -15,6 +15,12 @@ router = APIRouter(prefix="/api/files", tags=["文件管理"])
 _WORK_DIR = os.path.abspath(os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
 ))
+
+# 上传目录
+_UPLOAD_DIR = os.path.join(_WORK_DIR, "output")
+os.makedirs(_UPLOAD_DIR, exist_ok=True)
+
+_MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20MB
 
 
 def _resolve_file_path(file: str) -> str:
@@ -31,6 +37,42 @@ def _resolve_file_path(file: str) -> str:
     if not os.path.isfile(real_path):
         raise HTTPException(status_code=404, detail="文件不存在")
     return real_path
+
+
+@router.post("/upload")
+async def api_upload_file(
+    file: UploadFile = File(...),
+    current_user = Depends(get_current_user),
+):
+    """上传文件（供对话/任务使用，保存到 output 目录）"""
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="未选择文件")
+
+    # 安全检查：限制文件大小
+    content = await file.read()
+    if len(content) > _MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=400, detail=f"文件超过 {_MAX_UPLOAD_SIZE // 1024 // 1024}MB 限制")
+
+    # 安全文件名
+    safe_name = file.filename.replace("\\", "_").replace("/", "_")
+    filepath = os.path.join(_UPLOAD_DIR, safe_name)
+
+    # 避免覆盖：同名文件加序号
+    base, ext = os.path.splitext(safe_name)
+    counter = 1
+    while os.path.exists(filepath):
+        filepath = os.path.join(_UPLOAD_DIR, f"{base}_{counter}{ext}")
+        counter += 1
+
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    return {
+        "ok": True,
+        "filename": file.filename,
+        "path": f"output/{os.path.basename(filepath)}",
+        "size": len(content),
+    }
 
 
 @router.get("/list")
