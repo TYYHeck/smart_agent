@@ -627,6 +627,17 @@ async function previewFile(filepath) {
   } catch(e) { console.error(e); alert('预览失败: ' + e.message); }
 }
 
+async function deleteOutputFile(filepath) {
+  if(!confirm('确认永久删除文件 '+filepath+'？此操作不可恢复。')) return;
+  try {
+    const url = '/api/files/delete?file=' + encodeURIComponent(filepath);
+    const resp = await fetch(url, {method:'DELETE', headers: apiHeaders()});
+    const data = await resp.json();
+    if(data.ok) { loadOutputFiles(); }
+    else { alert('删除失败: '+(data.detail||'未知错误')); }
+  } catch(e) { alert('删除出错: '+e.message); }
+}
+
 function getCodeLang(filepath) {
   const ext = (filepath||'').toLowerCase().split('.').pop();
   const map = {py:'language-python',js:'language-javascript',ts:'language-typescript',
@@ -1109,6 +1120,7 @@ async function refreshTasks(status) {
           <button class="btn btn-outline btn-sm" onclick="showTaskDetailModal('${t.id}')">详情</button>
           ${t.status==='pending'?`<button class="btn btn-outline btn-sm" onclick="showEditTaskModal('${t.id}')">编辑</button>`:''}
           ${t.status==='pending'||t.status==='running'?`<button class="btn btn-danger btn-sm" onclick="cancelTask('${t.id}')">取消</button>`:''}
+          ${t.status==='completed'||t.status==='failed'||t.status==='cancelled'?`<button class="btn btn-danger btn-sm" onclick="deleteTask('${t.id}')">🗑 删除</button>`:''}
         </div>
       </div>`;
     }).join('');
@@ -1147,6 +1159,16 @@ async function showEditTaskModal(taskId) {
 async function cancelTask(taskId) {
   if(!confirm('确认取消任务 '+taskId+'?')) return;
   try { await api('/api/tasks/'+taskId+'/cancel',{method:'POST'}); refreshTasks(''); } catch(e) { console.error(e); }
+}
+
+async function deleteTask(taskId) {
+  if(!confirm('确认永久删除任务 '+taskId+'？此操作不可恢复。')) return;
+  try {
+    const resp = await fetch('/api/tasks/'+taskId, {method:'DELETE', headers: apiHeaders()});
+    const data = await resp.json();
+    if(data.ok) { refreshTasks(''); loadDashboard(); }
+    else { alert('删除失败: '+(data.error||'未知错误')); }
+  } catch(e) { alert('删除出错: '+e.message); }
 }
 
 // ==================== 多 Agent 编排执行 ====================
@@ -1541,6 +1563,7 @@ async function showTaskDetailModal(taskId) {
                 <span class="file-path-muted" title="${escHtml(f)}">${escHtml(f)}</span>
                 <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();downloadFile('${escAttr(f)}')">⬇ 下载</button>
                 <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();previewFile('${escAttr(f)}')">👁 预览</button>
+                <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteOutputFile('${escAttr(f)}')">🗑</button>
               </div>`;
             }).join('')}
           </div>
@@ -1836,6 +1859,7 @@ async function loadOutputFiles() {
         <td>
           <button class="btn btn-sm btn-outline" onclick="downloadFile('${escAttr(f.path)}')">⬇ 下载</button>
           <button class="btn btn-sm btn-outline" onclick="previewFile('${escAttr(f.path)}')">👁 预览</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteOutputFile('${escAttr(f.path)}')">🗑</button>
         </td>
       </tr>`;
     });

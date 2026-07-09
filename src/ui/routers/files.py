@@ -141,3 +141,20 @@ async def api_preview_file(file: str, current_user = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="二进制文件不支持预览")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/delete")
+async def api_delete_file(file: str, current_user = Depends(get_current_user)):
+    """删除输出文件（从磁盘永久删除）"""
+    real_path = _resolve_file_path(file)
+
+    # 额外安全检查：只允许删除 output 目录下的文件
+    output_dir = os.path.abspath(os.path.join(_WORK_DIR, "output"))
+    if not os.path.abspath(real_path).startswith(output_dir):
+        raise HTTPException(status_code=403, detail="只允许删除 output 目录下的文件")
+
+    try:
+        os.remove(real_path)
+        return {"ok": True, "file": file}
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")

@@ -402,6 +402,30 @@ class TaskManager:
             self._persist_task(task)
             self._persist_events(task)
 
+    def delete_task(self, task_id: str) -> bool:
+        """永久删除任务记录（从内存和数据库移除）"""
+        task = None
+        with self._lock:
+            task = self._find_task(task_id)
+            if task is None:
+                return False
+            # 如果正在执行，先释放 Agent
+            if task.status == TaskStatus.RUNNING and task.assigned_agent:
+                agent = self._agents.get(task.assigned_agent)
+                if agent:
+                    agent.status = "idle"
+                    agent.current_task_id = None
+            # 从队列和历史中移除
+            self._queue = [t for t in self._queue if t.id != task_id]
+            self._history = [t for t in self._history if t.id != task_id]
+
+        # 持久层删除
+        repo = self._repo
+        if repo and repo.db_enabled:
+            self._run_async(repo.delete_task(task_id))
+
+        return True
+
     # ======== 查询 ========
 
     def get_task(self, task_id: str) -> Optional[dict]:

@@ -222,6 +222,15 @@ async def api_cancel_task(task_id: str, current_user = Depends(get_current_user)
     return {"ok": True}
 
 
+@router.delete("/{task_id}")
+async def api_delete_task(task_id: str, current_user = Depends(get_current_user)):
+    tm = get_task_manager()
+    ok = tm.delete_task(task_id)
+    if not ok:
+        return JSONResponse({"ok": False, "error": "任务未找到"}, status_code=404)
+    return {"ok": True}
+
+
 @router.get("/queue/status")
 async def api_queue_status(current_user = Depends(get_current_user)):
     tm = get_task_manager()
