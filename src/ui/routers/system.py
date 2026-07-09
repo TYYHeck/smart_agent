@@ -18,6 +18,7 @@ class SwitchModelRequest(BaseModel):
     model: str = Field(..., description="模型 ID")
     provider: str | None = Field(None, description="提供商")
     base_url: str | None = Field(None, description="自定义 API 地址")
+    api_key: str | None = Field(None, description="API Key")
 
 
 class ToggleModeRequest(BaseModel):
@@ -27,6 +28,19 @@ class ToggleModeRequest(BaseModel):
 class UpdateConfigRequest(BaseModel):
     section: str = Field(..., description="配置节名称")
     data: dict = Field(..., description="更新的键值对")
+
+
+class UpdateLLMConfigRequest(BaseModel):
+    provider: str = Field(..., description="提供商: openai/deepseek/zhipu/qwen/ollama/custom")
+    model: str = Field("", description="模型 ID")
+    api_key: str = Field("", description="API Key（支持 ${VAR} 引用环境变量）")
+    base_url: str = Field("", description="自定义 API 地址（custom 提供商时必填）")
+
+
+class QueryModelsRequest(BaseModel):
+    provider: str = Field(..., description="提供商")
+    api_key: str = Field("", description="API Key")
+    base_url: str = Field("", description="自定义 API 地址")
 
 
 @config_router.get("")
@@ -100,12 +114,78 @@ async def api_models(current_user = Depends(get_current_user)):
 async def api_switch_model(req: SwitchModelRequest, current_user = Depends(get_current_user)):
     from ..web_server import get_agent
     agent = get_agent()
-    agent.switch_model(model=req.model, provider=req.provider, base_url=req.base_url)
+    agent.switch_model(model=req.model, provider=req.provider,
+                       base_url=req.base_url, api_key=req.api_key)
     return {
         "ok": True,
         "model": agent.llm.config.model if agent.llm else "N/A",
         "provider": agent.llm.config.provider if agent.llm else "N/A",
     }
+
+
+# ── LLM 提供商配置 API ──
+
+@config_router.post("/llm")
+async def api_config_llm_update(req: UpdateLLMConfigRequest, current_user = Depends(get_current_user)):
+    """更新 LLM 提供商配置：写入 config.yaml 并应用到运行时"""
+    import yaml
+    from ..web_server import get_agent
+
+    config_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+        "config.yaml",
+    )
+    if os.path.exists(config_path):
+        with open(config_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    else:
+        cfg = {}
+
+    cfg.setdefault("llm", {})
+    cfg["llm"]["provider"] = req.provider
+    cfg["llm"]["api_key"] = req.api_key
+    if req.model:
+        cfg["llm"]["model"] = req.model
+    if req.base_url:
+        cfg["llm"]["base_url"] = req.base_url
+    elif "base_url" in cfg.get("llm", {}):
+        cfg["llm"].pop("base_url", None)
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
+
+    # 运行时切换
+    try:
+        agent = get_agent()
+        actual_model = req.model or (agent.llm.config.model if agent.llm else "gpt-3.5-turbo")
+        agent.switch_model(
+            model=actual_model,
+            provider=req.provider,
+            api_key=req.api_key,
+            base_url=req.base_url or None,
+        )
+    except Exception as e:
+        return {"ok": True, "saved": True, "switched": False, "warning": str(e)}
+
+    return {
+        "ok": True,
+        "saved": True,
+        "switched": True,
+        "provider": req.provider,
+        "model": agent.llm.config.model if agent.llm else "N/A",
+    }
+
+
+@model_router.post("/api/models/query")
+async def api_query_models(req: QueryModelsRequest, current_user = Depends(get_current_user)):
+    """查询指定 provider 的可用模型列表"""
+    from ..web_server import _agent
+    models = _agent.query_models(
+        provider=req.provider,
+        api_key=req.api_key,
+        base_url=req.base_url,
+    ) if _agent else []
+    return {"ok": True, "provider": req.provider, "models": models}
 
 
 @model_router.post("/api/toggle_mode")

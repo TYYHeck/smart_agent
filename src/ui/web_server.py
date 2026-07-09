@@ -1690,17 +1690,74 @@ async function loadConfig() {
   } catch(e) { console.error(e); }
 }
 
+// ==================== LLM 提供商配置 ====================
+const PROVIDER_OPTIONS = [
+  {id:'openai', name:'OpenAI', hint:'api.openai.com', defaultUrl:'https://api.openai.com/v1', models:['gpt-4o','gpt-4o-mini','gpt-4-turbo','gpt-3.5-turbo']},
+  {id:'deepseek', name:'DeepSeek', hint:'api.deepseek.com', defaultUrl:'https://api.deepseek.com', models:['deepseek-chat','deepseek-reasoner']},
+  {id:'zhipu', name:'智谱 GLM', hint:'open.bigmodel.cn', defaultUrl:'https://open.bigmodel.cn/api/paas/v4', models:['glm-4','glm-4-flash']},
+  {id:'qwen', name:'通义千问', hint:'dashscope.aliyuncs.com', defaultUrl:'https://dashscope.aliyuncs.com/compatible-mode/v1', models:['qwen-plus','qwen-max','qwen-turbo']},
+  {id:'ollama', name:'Ollama 本地', hint:'localhost:11434', defaultUrl:'http://localhost:11434/v1', models:['llama3','qwen2.5','deepseek-r1']},
+  {id:'custom', name:'自定义 OpenAI 兼容', hint:'your-api.com', defaultUrl:'', models:[]},
+];
+
 function renderConfigSections(cfg) {
+  const llm = cfg.llm || {};
+  const currentProvider = llm.provider || 'deepseek';
+  const currentModel = llm.model || '';
+  const currentApiKey = llm.api_key || '';
+  const currentBaseUrl = llm.base_url || '';
+  const currentTemp = llm.temperature ?? 0.7;
+  const currentMaxTokens = llm.max_tokens ?? 4096;
+
+  // 生成 provider 选项
+  const providerOptions = PROVIDER_OPTIONS.map(p =>
+    `<option value="${p.id}" ${p.id===currentProvider?'selected':''}>${p.name} (${p.hint})</option>`
+  ).join('');
+
+  let html = '';
+  // ── LLM 提供商配置 ──
+  html += `<div style="background:var(--card);border:2px solid var(--primary);border-radius:10px;padding:20px;margin-bottom:16px;">
+    <h3 style="color:var(--primary);margin-bottom:4px;">🔌 LLM 提供商配置</h3>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:16px;">选择提供商并填入 API Key，保存后立即生效。支持 OpenAI / DeepSeek / 智谱 / 通义千问 / Ollama / 自定义兼容 API。</p>
+    <div class="form-group">
+      <label>提供商 (Provider)</label>
+      <select class="form-select" id="cfg_llm_provider" onchange="onProviderChange()">${providerOptions}</select>
+    </div>
+    <div class="form-group">
+      <label>API Key</label>
+      <input class="form-input" id="cfg_llm_api_key" type="password" value="${escAttr(currentApiKey)}" placeholder="sk-... 或 \${VARNAME} 引用环境变量">
+      <div class="form-help">支持明文 key，也支持 <code>\${DEEPSEEK_API_KEY}</code> 引用系统环境变量</div>
+    </div>
+    <div class="form-group" id="cfg_base_url_group">
+      <label>Base URL <span style="color:var(--muted);font-size:11px;">(自定义 API 地址)</span></label>
+      <input class="form-input" id="cfg_llm_base_url" value="${escAttr(currentBaseUrl)}" placeholder="留空自动匹配">
+      <div class="form-help" id="cfg_base_url_hint">当前提供商默认: ${getDefaultUrl(currentProvider) || '需手动填写'}</div>
+    </div>
+    <div class="form-group">
+      <label>模型 ID</label>
+      <div style="display:flex;gap:8px;">
+        <input class="form-input" id="cfg_llm_model" value="${escAttr(currentModel)}" placeholder="如 gpt-4o / deepseek-chat" style="flex:1;">
+        <button class="btn btn-outline" onclick="testProviderConnection()" id="btnTestConn" style="white-space:nowrap;">🔍 获取模型列表</button>
+      </div>
+      <div class="form-help">输入模型 ID，或点击右侧按钮从 API 获取可用列表</div>
+    </div>
+    <div id="modelQueryResult" style="margin-top:8px;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-group">
+        <label>Temperature</label>
+        <input class="form-input" id="cfg_llm_temperature" type="number" min="0" max="2" step="0.1" value="${currentTemp}">
+      </div>
+      <div class="form-group">
+        <label>Max Tokens</label>
+        <input class="form-input" id="cfg_llm_max_tokens" type="number" min="1" value="${currentMaxTokens}">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="saveLLMConfig()" style="margin-top:4px;">💾 保存提供商配置</button>
+    <span id="llmSaveStatus" style="margin-left:12px;font-size:13px;"></span>
+  </div>`;
+
+  // ── 其他配置节 ──
   const sections = [
-    { key:'llm', title:'LLM 大模型', fields:[
-      {k:'provider',l:'Provider',t:'text',h:'deepseek / openai / qwen / zhipu'},
-      {k:'model',l:'Model',t:'text',h:'例如 deepseek-chat'},
-      {k:'api_key',l:'API Key',t:'password',h:'留空从环境变量读取'},
-      {k:'base_url',l:'Base URL',t:'text',h:'留空自动补全'},
-      {k:'temperature',l:'Temperature',t:'number',h:'0-2，越高越随机'},
-      {k:'max_tokens',l:'Max Tokens',t:'number',h:'最大输出长度'},
-      {k:'timeout',l:'Timeout (秒)',t:'number',h:'请求超时'},
-    ]},
     { key:'agent', title:'Agent 设置', fields:[
       {k:'name',l:'名称',t:'text'},
       {k:'max_iterations',l:'最大迭代',t:'number',h:'单次任务最大迭代次数'},
@@ -1726,7 +1783,6 @@ function renderConfigSections(cfg) {
     ]},
   ];
 
-  let html = '';
   sections.forEach(sec => {
     const secData = cfg[sec.key]||{};
     html += `<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px;">
@@ -1754,9 +1810,109 @@ function renderConfigSections(cfg) {
   $('configSections').innerHTML = html;
 }
 
+function getDefaultUrl(provider) {
+  const p = PROVIDER_OPTIONS.find(o=>o.id===provider);
+  return p ? p.defaultUrl : '';
+}
+
+function onProviderChange() {
+  const provider = $('cfg_llm_provider').value;
+  const p = PROVIDER_OPTIONS.find(o=>o.id===provider);
+  const hintEl = $('cfg_base_url_hint');
+  if(p) {
+    hintEl.textContent = (p.defaultUrl ? '默认: '+p.defaultUrl : '需手动输入 API 地址');
+    if(p.defaultUrl && !$('cfg_llm_base_url').value) {
+      $('cfg_llm_base_url').placeholder = p.defaultUrl;
+    }
+  }
+}
+
+async function testProviderConnection() {
+  const provider = $('cfg_llm_provider').value;
+  const apiKey = $('cfg_llm_api_key').value;
+  const baseUrl = $('cfg_llm_base_url').value;
+  const btn = $('btnTestConn');
+  const resultDiv = $('modelQueryResult');
+
+  btn.disabled = true;
+  btn.textContent = '查询中...';
+  resultDiv.innerHTML = '<div style="color:var(--muted);">正在查询模型列表...</div>';
+
+  try {
+    const resp = await api('/api/models/query', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({provider, api_key:apiKey, base_url:baseUrl})
+    });
+
+    if(!resp.ok || !resp.models || resp.models.length===0) {
+      resultDiv.innerHTML = '<div style="color:var(--warn);margin-top:4px;">⚠️ 未获取到模型列表，请检查 API Key 和网络连接。将使用本地兜底列表。</div>';
+    } else {
+      const modelTags = resp.models.map(m =>
+        `<span class="skill-tag" style="cursor:pointer;margin:3px;" onclick="$('cfg_llm_model').value='${escAttr(m.id)}'" title="点击选择此模型">${m.id}</span>`
+      ).join('');
+      resultDiv.innerHTML = `<div style="color:var(--success);margin-top:4px;">✅ 获取到 ${resp.models.length} 个模型：</div>
+        <div style="margin-top:4px;">${modelTags}</div>
+        <div class="form-help" style="margin-top:2px;">点击模型名自动填入上方输入框</div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = '<div style="color:var(--error);margin-top:4px;">❌ 查询失败: '+e.message+'</div>';
+  }
+  btn.disabled = false;
+  btn.textContent = '🔍 获取模型列表';
+}
+
+async function saveLLMConfig() {
+  const provider = $('cfg_llm_provider').value;
+  const apiKey = $('cfg_llm_api_key').value;
+  const baseUrl = $('cfg_llm_base_url').value;
+  const model = $('cfg_llm_model').value;
+  const temperature = parseFloat($('cfg_llm_temperature').value) || 0.7;
+  const maxTokens = parseInt($('cfg_llm_max_tokens').value) || 4096;
+  const statusEl = $('llmSaveStatus');
+
+  statusEl.textContent = '保存中...';
+  statusEl.style.color = 'var(--muted)';
+
+  try {
+    // 1. 保存 LLM 提供商配置到 config.yaml
+    const resp1 = await api('/api/config/llm', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({provider, api_key:apiKey, model, base_url:baseUrl})
+    });
+
+    // 2. 保存 temperature 和 max_tokens
+    await api('/api/config/update', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({section:'llm', data:{temperature, max_tokens:maxTokens}})
+    });
+
+    if(resp1.ok) {
+      statusEl.textContent = '✅ 已保存' + (resp1.switched ? '并生效' : '（需重启）');
+      statusEl.style.color = 'var(--success)';
+
+      // 刷新侧边栏模型列表
+      try {
+        const mc = await api('/api/models');
+        if(mc.models && mc.models.length>0) {
+          initModelCombo(mc.models, mc.current);
+        }
+      } catch(e) {}
+    } else {
+      statusEl.textContent = '保存失败';
+      statusEl.style.color = 'var(--error)';
+    }
+  } catch(e) {
+    statusEl.textContent = '错误: '+e.message;
+    statusEl.style.color = 'var(--error)';
+  }
+  setTimeout(() => { statusEl.textContent = ''; }, 4000);
+}
+
 async function saveSection(section) {
   const fields = {
-    llm: ['provider','model','api_key','base_url','temperature','max_tokens','timeout'],
     agent: ['name','max_iterations','verbose'],
     memory: ['short_term.max_turns','short_term.summarize_threshold','long_term.enabled','long_term.db_path'],
     rag: ['enabled','embedding_model','embedding_provider','chunk_size','chunk_overlap','top_k','persist_dir'],

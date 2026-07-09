@@ -129,6 +129,25 @@ class _CommandCompleter(Completer):
             if len(tokens) == 2 and tokens[1] not in CLI.KB_SUB:
                 return CLI.KB_SUB
 
+        # ── /config 子命令 ──
+        if first == "/config":
+            if len(tokens) == 1:
+                return CLI.CONFIG_SUB
+            if len(tokens) == 2 and tokens[1] not in CLI.CONFIG_SUB:
+                return CLI.CONFIG_SUB
+            if tokens[1] == "llm":
+                if len(tokens) == 2:
+                    return CLI.CONFIG_LLM_SUB
+                if tokens[2] in ("set",):
+                    if len(tokens) >= 4:
+                        return ["openai", "deepseek", "zhipu", "qwen", "ollama", "custom"]
+                elif tokens[2] in ("models",):
+                    if "--key" in tokens or "--url" in tokens:
+                        return ["openai", "deepseek", "zhipu", "qwen", "ollama", "custom"]
+                    if len(tokens) >= 4:
+                        return ["openai", "deepseek", "zhipu", "qwen", "ollama", "custom", "--key", "--url"]
+                    return CLI.CONFIG_LLM_SUB
+
         # ── /recall → 不补全（自由文本）──
         if first == "/recall":
             return []
@@ -319,6 +338,13 @@ class _ReadlineCompleter:
         if first == "/recall":
             return []
 
+        if first == "/config":
+            if len(tokens) == 1:
+                return CLI.CONFIG_SUB
+            if tokens[1] == "llm" and len(tokens) <= 3:
+                return CLI.CONFIG_LLM_SUB
+            return []
+
         if len(tokens) == 1 and first.startswith("/"):
             return CLI.ROOT_COMMANDS
 
@@ -341,6 +367,8 @@ class CLI:
     AGENT_SUB = ["list", "register", "unregister", "create", "update", "delete", "cleanup"]
     KB_SUB = ["upload", "search", "files", "delete", "clear"]
     ORCH_SUB = ["run", "detect", "modes"]
+    CONFIG_SUB = ["show", "get", "llm"]
+    CONFIG_LLM_SUB = ["show", "set", "models"]
 
     def __init__(self, agent: Agent):
         self.agent = agent
@@ -1144,6 +1172,140 @@ class CLI:
             else:
                 print(f"[Config] 未找到: {key}")
 
+        elif parts[1].lower() == "llm":
+            self._handle_config_llm(parts[2:], cfg, config_path)
+
+        else:
+            print(f"[Config] 未知子命令: {parts[1]}")
+            print("  用法: /config show | /config get <键> | /config llm <子命令>")
+
+    def _handle_config_llm(self, parts: list[str], cfg: dict, config_path: str):
+        """处理 /config llm 子命令"""
+        import yaml
+        from src.core.agent import Agent
+
+        if len(parts) < 1:
+            print("[Config LLM] 用法:")
+            print("  /config llm show          查看当前 LLM 配置")
+            print("  /config llm set <provider> <model> [--key <api_key>] [--url <base_url>]")
+            print("                            设置 LLM 提供商和模型")
+            print("  /config llm models [provider] [--key <api_key>] [--url <base_url>]")
+            print("                            查询可用模型列表")
+            print("  支持 provider: openai / deepseek / zhipu / qwen / ollama / custom")
+            return
+
+        sub = parts[0].lower()
+
+        if sub == "show":
+            llm = cfg.get("llm", {})
+            print(f"\n--- LLM 配置 ---")
+            print(f"  提供商:    {llm.get('provider', 'N/A')}")
+            print(f"  模型:      {llm.get('model', 'N/A')}")
+            key = llm.get('api_key', '')
+            print(f"  API Key:   {'***' if key else '(从环境变量读取)'}")
+            print(f"  Base URL:  {llm.get('base_url', '(自动)')}")
+            print(f"  Temp:      {llm.get('temperature', 'N/A')}")
+            print(f"  MaxTokens: {llm.get('max_tokens', 'N/A')}")
+            print()
+
+        elif sub == "set" and len(parts) >= 2:
+            provider = parts[1]
+            model = parts[2] if len(parts) > 2 else ""
+            api_key = ""
+            base_url = ""
+
+            i = 3
+            while i < len(parts):
+                if parts[i] == "--key" and i + 1 < len(parts):
+                    api_key = parts[i + 1]
+                    i += 2
+                elif parts[i] == "--url" and i + 1 < len(parts):
+                    base_url = parts[i + 1]
+                    i += 2
+                else:
+                    i += 1
+
+            valid_providers = ["openai", "deepseek", "zhipu", "qwen", "ollama", "custom"]
+            if provider not in valid_providers:
+                print(f"[Config LLM] 不支持的提供商: {provider}")
+                print(f"  可用: {', '.join(valid_providers)}")
+                return
+
+            # 写入配置
+            cfg.setdefault("llm", {})
+            cfg["llm"]["provider"] = provider
+            cfg["llm"]["api_key"] = api_key
+            if model:
+                cfg["llm"]["model"] = model
+            if base_url:
+                cfg["llm"]["base_url"] = base_url
+            elif "base_url" in cfg.get("llm", {}):
+                cfg["llm"].pop("base_url", None)
+
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
+
+            print(f"[Config LLM] 已将提供商设置为 {provider}")
+
+            # 运行时切换
+            if self.agent.llm:
+                actual_model = model or self.agent.llm.config.model
+                try:
+                    self.agent.switch_model(
+                        model=actual_model,
+                        provider=provider,
+                        api_key=api_key or None,
+                        base_url=base_url or None,
+                    )
+                    print(f"[Config LLM] 已切换到 {actual_model} (provider: {provider})")
+                except Exception as e:
+                    print(f"[Config LLM] 运行时切换失败 (需重启): {e}")
+
+        elif sub == "models":
+            # 解析参数
+            provider = ""
+            api_key = ""
+            base_url = ""
+            i = 0
+            while i < len(parts):
+                if i == 0 and not parts[0].startswith("--"):
+                    provider = parts[0]
+                    i += 1
+                elif parts[i] == "--key" and i + 1 < len(parts):
+                    api_key = parts[i + 1]
+                    i += 2
+                elif parts[i] == "--url" and i + 1 < len(parts):
+                    base_url = parts[i + 1]
+                    i += 2
+                else:
+                    i += 1
+
+            if not provider:
+                provider = cfg.get("llm", {}).get("provider", "deepseek")
+
+            # 用当前 agent 的 key/url 兜底
+            if not api_key and self.agent.llm:
+                api_key = self.agent.llm.config.api_key
+            if not base_url and self.agent.llm:
+                base_url = self.agent.llm.config.base_url
+
+            print(f"[Config LLM] 查询 {provider} 的模型列表...")
+            models = Agent.query_models(
+                provider=provider,
+                api_key=api_key,
+                base_url=base_url,
+            )
+            if models:
+                print(f"{provider} 可用模型 ({len(models)} 个):")
+                for m in models:
+                    print(f"  - {m['id']}")
+            else:
+                print(f"  未获取到模型列表（请检查 API Key 和网络连接）")
+
+        else:
+            print(f"[Config LLM] 未知子命令: {sub}")
+            print("  用法: /config llm show | set | models")
+
     def _show_help(self):
         help_text = """
         --- SmartAgent 命令列表 ---
@@ -1210,6 +1372,11 @@ class CLI:
         配置管理:
           /config show           查看当前配置
           /config get <键>       查看指定配置项
+          /config llm show       查看 LLM 提供商配置
+          /config llm set <provider> <model> [--key <api_key>] [--url <base_url>]
+                                 设置 LLM 提供商和模型
+          /config llm models [provider] [--key <api_key>]
+                                 查询提供商可用模型列表
         """
         print(help_text)
 

@@ -20,6 +20,7 @@ from typing import Any, ClassVar, Optional, Callable, AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
+import os
 import json
 import traceback
 import logging
@@ -387,7 +388,7 @@ class Agent:
     # ======== 模型管理 ========
 
     def switch_model(self, model: str, provider: str | None = None,
-                     base_url: str | None = None) -> str:
+                     base_url: str | None = None, api_key: str | None = None) -> str:
         """
         运行时切换模型（保留记忆和工具）
         """
@@ -398,7 +399,7 @@ class Agent:
         new_config = LLMConfig(
             provider=provider or old_config.provider,
             model=model,
-            api_key=old_config.api_key,
+            api_key=api_key if api_key is not None else old_config.api_key,
             base_url=base_url if base_url is not None else old_config.base_url,
             temperature=old_config.temperature,
             max_tokens=old_config.max_tokens,
@@ -406,7 +407,7 @@ class Agent:
         )
         self.llm = create_llm(new_config)
         self._rebuild_graph()
-        self._log(f"[Model] 已切换到 {model}")
+        self._log(f"[Model] 已切换到 {model} (provider: {new_config.provider})")
         return model
 
     # ── 各 provider 的本地兜底模型列表（API 不可达时使用）──
@@ -499,6 +500,71 @@ class Agent:
                 m["name"] = f"{m['id']} (当前)"
                 break
         return fallback
+
+    @staticmethod
+    def query_models(provider: str, api_key: str = "", base_url: str = "",
+                     timeout: int = 10) -> list[dict]:
+        """静态方法：查询任意 provider 的可用模型列表（无需 Agent 实例）"""
+        import urllib.request as _urllib
+        import json as _json
+
+        if provider == "ollama":
+            try:
+                req = _urllib.Request("http://localhost:11434/api/tags")
+                resp = _urllib.urlopen(req, timeout=5)
+                data = _json.loads(resp.read().decode())
+                return [{"id": m.get("name", ""), "name": m.get("name", ""), "provider": "ollama"}
+                        for m in data.get("models", []) if m.get("name")]
+            except Exception:
+                return []
+
+        # 构建 base_url
+        if not base_url:
+            base_map = {
+                "openai": "https://api.openai.com/v1",
+                "deepseek": "https://api.deepseek.com",
+                "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+                "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            }
+            base_url = base_map.get(provider, "https://api.openai.com/v1")
+        base_url = base_url.rstrip("/")
+
+        # 解析 API key
+        if not api_key:
+            env_map = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY",
+                       "zhipu": "ZHIPU_API_KEY", "qwen": "DASHSCOPE_API_KEY"}
+            env_key = env_map.get(provider, "OPENAI_API_KEY")
+            api_key = os.environ.get(env_key, "")
+        api_key = Agent._resolve_key(api_key)
+
+        try:
+            headers = {"Authorization": f"Bearer {api_key}"}
+            url = f"{base_url}/models"
+            req = _urllib.Request(url, headers=headers)
+            resp = _urllib.urlopen(req, timeout=timeout)
+            data = _json.loads(resp.read().decode())
+
+            models = []
+            for m in data.get("data", []):
+                m_id = m.get("id", "")
+                if not m_id:
+                    continue
+                if not Agent._belongs_to_provider(m_id, provider):
+                    continue
+                models.append({"id": m_id, "name": m_id, "provider": provider})
+            return models
+        except Exception:
+            # 兜底
+            return [dict(m) for m in Agent._FALLBACK_MODELS.get(provider, [])]
+
+    @staticmethod
+    def _resolve_key(api_key: str) -> str:
+        """解析 ${VAR} 环境变量引用"""
+        import re
+        m = re.match(r'^\$\{(\w+)\}$', api_key.strip())
+        if m:
+            return os.environ.get(m.group(1), "")
+        return api_key
 
     @staticmethod
     def _belongs_to_provider(model_id: str, provider: str) -> bool:
