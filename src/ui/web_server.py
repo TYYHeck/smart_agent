@@ -93,10 +93,10 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .tab-btn .tab-icon { margin-right:4px; }
 /* 主区域 */
 .main { flex:1; display:flex; flex-direction:column; min-width:0; }
-.tab-content { flex:1; overflow-y:auto; display:none; }
-.tab-content.active { display:flex; flex-direction:column; }
+.tab-content { flex:1; overflow-y:auto; overflow-x:hidden; display:none; }
+.tab-content.active { display:flex; flex-direction:column; min-width:0; }
 /* ---- 仪表盘 ---- */
-.dashboard { padding:24px; gap:20px; }
+.dashboard { padding:24px; gap:20px; min-width:0; }
 .stat-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:20px; }
 .stat-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; text-align:center; }
 .stat-card .stat-val { font-size:28px; font-weight:bold; color:var(--text-bright); }
@@ -174,7 +174,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .form-textarea { resize:vertical; min-height:60px; }
 .form-help { font-size:11px; color:var(--muted); margin-top:2px; }
 /* ---- 聊天 ---- */
-.chat-area { flex:1; overflow-y:auto; padding:24px; display:flex; flex-direction:column; gap:16px; }
+.chat-area { flex:1; overflow-y:auto; overflow-x:hidden; padding:24px; display:flex; flex-direction:column; gap:16px; }
 .message { display:flex; gap:12px; animation:fadeIn .3s; max-width:85%; }
 .message.user { align-self:flex-end; flex-direction:row-reverse; }
 .message.agent { align-self:flex-start; }
@@ -212,7 +212,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .input-area button:hover { opacity:.85; }
 .input-area button:disabled { opacity:.5; cursor:not-allowed; }
 /* 任务面板 */
-.task-panel { padding:24px; }
+.task-panel { padding:24px; min-width:0; }
 .task-panel h2 { color:var(--text-bright); margin-bottom:16px; font-size:18px; }
 .task-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
 .task-info { flex:1; }
@@ -1014,7 +1014,6 @@ async function sendMessage() {
 }
 
 // ==================== 任务发布模态框 ====================
-let execMode = 'single';          // 'single' | 'orchestrated'
 let orchAbortController = null;
 let orchIsExecuting = false;
 let taskModalFiles = [];  // 弹窗中已上传的文件列表 [{filename, path, size}]
@@ -1049,13 +1048,6 @@ function showNewTaskModal() {
       </select>
     </div>
     <div class="form-group">
-      <label>执行模式</label>
-      <div class="mode-toggle" style="justify-content:flex-start;">
-        <button class="mode-btn active" id="modalModeSingle" onclick="$(this).classList.add('active');$('modalModeOrch').classList.remove('active');$('modalOrchSection').style.display='none';">👤 单 Agent</button>
-        <button class="mode-btn" id="modalModeOrch" onclick="$(this).classList.add('active');$('modalModeSingle').classList.remove('active');$('modalOrchSection').style.display='';">🤖 多 Agent 编排</button>
-      </div>
-    </div>
-    <div class="form-group" id="modalOrchSection" style="display:none;">
       <label>编排策略</label>
       <select class="form-select" id="modalOrchMode" style="width:100%;">
         <option value="auto">🔍 自动选择最优策略</option>
@@ -1130,10 +1122,6 @@ function renderTaskModalFiles() {
     </div>`).join('');
 }
 
-function getModalExecMode() {
-  return $('modalModeOrch').classList.contains('active') ? 'orchestrated' : 'single';
-}
-
 function getModalOrchMode() {
   return ($('modalOrchMode') && $('modalOrchMode').value) || 'auto';
 }
@@ -1147,7 +1135,6 @@ async function submitNewTask() {
   const priority = parseInt($('modalTaskPriority')?.value) || 0;
   const tags = ($('modalTaskTags')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
   const targetAgent = ($('modalTaskAgent')?.value || '').trim();
-  const mode = getModalExecMode();
 
   // 拼接附件
   let fullDesc = desc;
@@ -1157,26 +1144,9 @@ async function submitNewTask() {
 
   closeModal();
 
-  if (mode === 'orchestrated') {
-    const orchMode = getModalOrchMode();
-    // 临时设置选中模式以便 executeOrchestrated 可用
-    execMode = 'orchestrated';
-    await executeOrchestrated(fullDesc, title, orchMode);
-  } else {
-    try {
-      await api('/api/tasks/publish', {
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          description: fullDesc,
-          title: title || desc.slice(0, 50),
-          priority: priority,
-          tags: tags,
-          target_agent: targetAgent
-        })
-      });
-      refreshTasks('');
-    } catch(e) { console.error(e); }
-  }
+  const orchMode = getModalOrchMode();
+  await executeOrchestrated(fullDesc, title, orchMode);
+}
 
   taskModalFiles = [];
 }
@@ -1436,9 +1406,6 @@ function appendOrchStageCard(evtName, info, container) {
 
   // 各事件卡片配置
   const templates = {
-    single_start: { icon: '👤', title: '单 Agent 开始执行', detail: `Agent: <b>${info.agent || ''}</b>` },
-    single_done: { icon: '✅', title: '单 Agent 执行完成', detail: `Agent: <b>${info.agent || ''}</b>`, cls: 'stage-done' },
-
     parallel_start: { icon: '⚡', title: `并行执行 — ${info.agent_count || 0} 个 Agent`, detail: `Agent: ${(info.agents || []).map(a => `<span class="orch-agent-tag active">${a}</span>`).join('')}`, cls: 'stage-active' },
     agent_start: { icon: '▶️', title: `${info.agent || ''} 开始工作`, detail: `第 ${info.index || 1}/${info.total || 1} 个 Agent` },
     agent_done: { icon: '✅', title: `${info.agent || ''} 完成`, detail: `第 ${info.index || 1}/${info.total || 1} 个 Agent`, cls: 'stage-done' },
@@ -2803,7 +2770,7 @@ async def api_orchestrate_task_stream(request: Request, req: OrchestrateTaskRequ
     # 先做模式检测（不需要线程，直接同步检测）
     if req.mode == "auto" and hasattr(tm, 'detect_best_mode'):
         detection = tm.detect_best_mode(req.description)
-        detected_mode = detection.get("mode", "single")
+        detected_mode = detection.get("mode", "parallel")
         detected_reason = detection.get("reason", "")
     else:
         detected_mode = req.mode
@@ -2881,7 +2848,7 @@ async def api_detect_mode(req: OrchestrateTaskRequest, current_user = Depends(ge
     detection = tm.detect_best_mode(req.description)
     available_modes = [
         {"value": m.value, "label": m.name, "desc": _mode_description(m)}
-        for m in ExecutionMode if m != ExecutionMode.AUTO
+        for m in ExecutionMode if m not in (ExecutionMode.AUTO, ExecutionMode.SINGLE)
     ]
     return {
         "ok": True,
