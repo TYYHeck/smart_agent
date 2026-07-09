@@ -3052,6 +3052,22 @@ async def api_preview_file(file: str, current_user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/api/files/delete")
+async def api_delete_file(file: str, current_user = Depends(get_current_user)):
+    """删除输出文件（从磁盘永久删除）"""
+    real_path = _safe_file_path(file)
+    if not real_path:
+        raise HTTPException(status_code=404, detail="文件不存在或路径非法")
+    if not _os.path.isfile(real_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        _os.remove(real_path)
+        return {"ok": True, "file": file}
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+
+
 @app.get("/api/tasks/list")
 async def api_list_tasks(status: str = "", limit: int = 20, current_user = Depends(get_current_user)):
     tm = get_task_manager()
