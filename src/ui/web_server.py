@@ -557,7 +557,7 @@ function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39
 // ==================== 文件下载 / 预览 ====================
 async function downloadFile(filepath) {
   const url = '/api/files/download?file=' + encodeURIComponent(filepath);
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('sa_token');
   try {
     const resp = await fetch(url, {
       headers: token ? { 'Authorization': 'Bearer ' + token } : {}

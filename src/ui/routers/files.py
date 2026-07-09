@@ -9,6 +9,16 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from src.auth.dependencies import get_current_user
 
+
+def _format_file_size(size: int) -> str:
+    """格式化文件大小"""
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
 router = APIRouter(prefix="/api/files", tags=["文件管理"])
 
 # 安全限制：只允许访问工作目录下的文件
@@ -85,10 +95,12 @@ async def api_list_files(task_id: str = "", current_user = Depends(get_current_u
             fpath = os.path.join(output_dir, fname)
             if os.path.isfile(fpath):
                 stat = os.stat(fpath)
+                size_val = stat.st_size
                 files.append({
                     "name": fname,
                     "path": f"output/{fname}",
-                    "size": stat.st_size,
+                    "size": size_val,
+                    "size_str": _format_file_size(size_val),
                     "modified": os.path.getmtime(fpath) if hasattr(os.path, 'getmtime') else None,
                 })
 
