@@ -317,12 +317,9 @@ class Orchestrator:
             task.result = result.final_result
         finally:
             task.finished_at = datetime.now()
-            # 持久化任务结果
-            self.tm._persist_task(task)
-            self.tm._persist_events(task)
             _current_task_id.reset(prev_task_id)  # 恢复上下文
 
-            # ── 通过 on_progress 发送完成信号（备份通道，确保前端收到完成通知）──
+            # ── 先发送完成信号（必须在持久化之前，确前端无论持久化成败都收到完成通知）──
             self._emit_progress(on_progress, "orchestration_complete", {
                 "task_id": task.id,
                 "success": result.success,
@@ -335,6 +332,13 @@ class Orchestrator:
                 "started_at": result.started_at.isoformat() if result.started_at else None,
                 "finished_at": datetime.now().isoformat(),
             })
+
+            # ── 持久化（不阻塞完成通知，失败仅记日志）──
+            try:
+                self.tm._persist_task(task)
+                self.tm._persist_events(task)
+            except Exception as e:
+                logger.error(f"持久化任务失败（前端已收到完成通知，不影响使用）: {e}")
 
         result.finished_at = datetime.now()
         return result

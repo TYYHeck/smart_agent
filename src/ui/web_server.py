@@ -2570,6 +2570,7 @@ async def api_orchestrate_task_stream(request: Request, req: OrchestrateTaskRequ
 
     def on_progress(stage: str, info: dict):
         """同步回调 → 异步队列 (线程安全桥接)"""
+        import logging as _log
         try:
             safe_info = {}
             for k, v in info.items():
@@ -2580,8 +2581,10 @@ async def api_orchestrate_task_stream(request: Request, req: OrchestrateTaskRequ
             asyncio.run_coroutine_threadsafe(
                 event_queue.put({"stage": "stage_" + stage, "info": safe_info}), loop
             )
-        except Exception:
-            pass
+        except Exception as e:
+            _log.getLogger("smart_agent.web").warning(
+                f"进度回调失败 stage={stage}: {e}", exc_info=True
+            )
 
     # 先做模式检测（不需要线程，直接同步检测）
     if req.mode == "auto" and hasattr(tm, 'detect_best_mode'):
