@@ -67,7 +67,7 @@ def create_engine(db_url: str | None = None, echo: bool = False) -> AsyncEngine:
         pool_size=10,
         max_overflow=20,
         pool_recycle=3600,
-        pool_pre_ping=True,
+        pool_pre_ping=False,  # aiomysql 下 pool_pre_ping 会导致事件循环冲突
     )
     _session_factory = async_sessionmaker(
         _engine,
