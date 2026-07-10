@@ -2988,11 +2988,11 @@ async def api_prompt_template(current_user = Depends(get_current_user)):
         "ok": True,
         "template": cfg.prompt_template,
         "sections": [
-            {"key": "role_definition", "label": "角色定义", "desc": "明确智能体的身份和行为风格。例如，"你是一名专业的旅游规划师，擅长根据用户需求调整行程方案"。"},
-            {"key": "core_objectives", "label": "核心目标", "desc": "用具体、可衡量的语言描述任务目标。例如，"确保客户订单从付款到发货的全流程跟踪"。"},
-            {"key": "behavior_rules", "label": "行为规则", "desc": "定义智能体的思考逻辑和交互规则。例如，"首次联系客户时需自我介绍并说明目的"。"},
-            {"key": "resource_calls", "label": "资源调用", "desc": "明确智能体可使用的工具和数据。例如，"可访问物流API，但不可调用客户隐私信息"。"},
-            {"key": "error_handling", "label": "容错机制", "desc": "规定异常情况的处理方式。例如，"若调用API失败，重试3次后切换备用接口"。"},
+            {"key": "role_definition", "label": "角色定义", "desc": "明确智能体的身份和行为风格。例如，'你是一名专业的旅游规划师，擅长根据用户需求调整行程方案'。"},
+            {"key": "core_objectives", "label": "核心目标", "desc": "用具体、可衡量的语言描述任务目标。例如，'确保客户订单从付款到发货的全流程跟踪'。"},
+            {"key": "behavior_rules", "label": "行为规则", "desc": "定义智能体的思考逻辑和交互规则。例如，'首次联系客户时需自我介绍并说明目的'。"},
+            {"key": "resource_calls", "label": "资源调用", "desc": "明确智能体可使用的工具和数据。例如，'可访问物流API，但不可调用客户隐私信息'。"},
+            {"key": "error_handling", "label": "容错机制", "desc": "规定异常情况的处理方式。例如，'若调用API失败，重试3次后切换备用接口'。"},
         ],
     }
 
