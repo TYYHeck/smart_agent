@@ -174,44 +174,94 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 .form-input:focus, .form-textarea:focus, .form-select:focus { border-color:var(--primary); }
 .form-textarea { resize:vertical; min-height:60px; }
 .form-help { font-size:11px; color:var(--muted); margin-top:2px; }
-/* ---- 聊天 ---- */
-.chat-area { flex:1; overflow-y:auto; overflow-x:hidden; padding:24px; display:flex; flex-direction:column; gap:16px; }
-.message { display:flex; gap:12px; animation:fadeIn .3s; max-width:85%; }
-.message.user { align-self:flex-end; flex-direction:row-reverse; }
-.message.agent { align-self:flex-start; }
-.avatar { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
-.message.user .avatar { background:var(--primary); }
-.message.agent .avatar { background:var(--card); }
-.bubble { padding:12px 16px; border-radius:12px; font-size:14px; line-height:1.6; word-break:break-word; }
-.message.user .bubble { background:var(--user-bg); color:white; border-bottom-right-radius:4px; }
-.message.agent .bubble { background:var(--agent-bg); color:var(--text); border-bottom-left-radius:4px; border:1px solid var(--border); }
-.bubble pre { background:var(--code-bg); padding:12px; border-radius:8px; overflow-x:auto; font-size:13px; margin:8px 0; border:1px solid var(--border); }
-.bubble code { background:var(--code-bg); padding:2px 6px; border-radius:4px; font-size:13px; }
-.bubble pre code { padding:0; background:none; }
-.bubble ul,.bubble ol { padding-left:20px; margin:6px 0; }
-.bubble li { margin:3px 0; line-height:1.5; }
-.bubble h1,.bubble h2,.bubble h3 { margin:8px 0 4px; color:var(--text-bright); }
-.bubble h1 { font-size:1.3em; } .bubble h2 { font-size:1.15em; } .bubble h3 { font-size:1.05em; }
-.bubble p { margin:4px 0; }
-.bubble strong { color:var(--text-bright); }
-.bubble table { border-collapse:collapse; margin:8px 0; font-size:13px; width:100%; }
-.bubble th,.bubble td { border:1px solid var(--border); padding:6px 10px; text-align:left; }
-.bubble th { background:var(--code-bg); color:var(--text-bright); font-weight:600; }
-.bubble hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
-.bubble blockquote { border-left:3px solid var(--primary); padding-left:12px; margin:8px 0; color:var(--muted); }
+/* ---- 统一聊天框 ---- */
+.unified-chat { display:flex; flex-direction:column; height:100%; }
+.unified-messages { flex:1; overflow-y:auto; padding:20px 24px; display:flex; flex-direction:column; gap:8px; }
+.unified-msg { display:flex; flex-direction:column; max-width:92%; animation:fadeIn .25s; }
+.unified-msg.user { align-items:flex-end; align-self:flex-end; }
+.unified-msg.agent { align-items:flex-start; align-self:flex-start; }
+.unified-msg .msg-header { display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:11px; }
+.unified-msg.user .msg-header { flex-direction:row-reverse; }
+.unified-msg .msg-agent-badge { padding:2px 10px; border-radius:10px; font-weight:bold; font-size:11px; }
+.unified-msg .msg-agent-badge.user-badge { background:var(--primary); color:#fff; }
+.unified-msg .msg-agent-badge.agent-badge { background:var(--purple); color:#fff; }
+.unified-msg .msg-time { color:var(--muted); font-size:10px; }
+.unified-msg .msg-body { padding:14px 18px; border-radius:16px; font-size:14px; line-height:1.7; word-break:break-word; }
+.unified-msg.user .msg-body { background:var(--user-bg); color:#fff; border-bottom-right-radius:4px; }
+.unified-msg.agent .msg-body { background:var(--agent-bg); color:var(--text); border:1px solid var(--border); border-bottom-left-radius:4px; }
+.unified-msg .msg-body pre { background:var(--code-bg); padding:12px; border-radius:8px; overflow-x:auto; font-size:13px; margin:8px 0; border:1px solid var(--border); }
+.unified-msg .msg-body code { background:var(--code-bg); padding:2px 6px; border-radius:4px; font-size:13px; }
+.unified-msg .msg-body pre code { padding:0; background:none; }
+.unified-msg .msg-body ul,.unified-msg .msg-body ol { padding-left:20px; margin:6px 0; }
+.unified-msg .msg-body li { margin:3px 0; line-height:1.5; }
+.unified-msg .msg-body h1,.unified-msg .msg-body h2,.unified-msg .msg-body h3 { margin:8px 0 4px; color:var(--text-bright); }
+.unified-msg .msg-body h1 { font-size:1.3em; } .unified-msg .msg-body h2 { font-size:1.15em; } .unified-msg .msg-body h3 { font-size:1.05em; }
+.unified-msg .msg-body p { margin:4px 0; }
+.unified-msg .msg-body strong { color:var(--text-bright); }
+.unified-msg .msg-body table { border-collapse:collapse; margin:8px 0; font-size:13px; width:100%; }
+.unified-msg .msg-body th,.unified-msg .msg-body td { border:1px solid var(--border); padding:6px 10px; text-align:left; }
+.unified-msg .msg-body th { background:var(--code-bg); color:var(--text-bright); font-weight:600; }
+.unified-msg .msg-body hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
+.unified-msg .msg-body blockquote { border-left:3px solid var(--primary); padding-left:12px; margin:8px 0; color:var(--muted); }
 .tool-call-card { background:#1a2740; border-left:3px solid var(--warn); padding:10px 14px; border-radius:8px; margin:8px 0; font-size:13px; color:#ccc; }
 .tool-call-card .tool-name { color:var(--warn); font-weight:bold; }
 .tool-call-card .tool-args { color:var(--muted); font-size:12px; margin-top:4px; }
 .tool-call-card.success { border-left-color:var(--success); }
 .tool-call-card .result-preview { font-size:12px; color:var(--muted); margin-top:4px; max-height:80px; overflow-y:auto; }
-/* 输入区 */
-.input-area { padding:16px 24px; border-top:1px solid var(--border); display:flex; gap:12px; align-items:flex-end; position:relative; }
-.input-area textarea { flex:1; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px 16px; color:var(--text); font-size:14px; resize:none; outline:none; font-family:inherit; min-height:44px; max-height:150px; }
-.input-area textarea:focus { border-color:var(--primary); }
-.input-area textarea::placeholder { color:var(--muted); }
-.input-area button { background:var(--primary); color:white; border:none; border-radius:10px; padding:10px 20px; font-size:14px; cursor:pointer; transition:opacity .2s; white-space:nowrap; }
-.input-area button:hover { opacity:.85; }
-.input-area button:disabled { opacity:.5; cursor:not-allowed; }
+/* ── 思考面板 ── */
+.think-panel { margin:4px 0 8px; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:var(--code-bg); }
+.think-panel-header { display:flex; align-items:center; gap:8px; padding:8px 14px; cursor:pointer; background:rgba(88,166,255,.08); user-select:none; }
+.think-panel-header:hover { background:rgba(88,166,255,.12); }
+.think-panel-header .think-icon { font-size:14px; }
+.think-panel-header .think-label { font-size:12px; color:var(--muted); flex:1; }
+.think-panel-header .think-agent { font-size:11px; color:var(--primary); font-weight:bold; }
+.think-panel-header .think-toggle { font-size:10px; color:var(--muted); transition:transform .2s; }
+.think-panel.collapsed .think-panel-body { display:none; }
+.think-panel.collapsed .think-toggle { transform:rotate(-90deg); }
+.think-panel-body { padding:10px 14px; font-size:12px; color:var(--muted); max-height:300px; overflow-y:auto; line-height:1.6; }
+.think-panel-body .think-step { padding:4px 0; border-bottom:1px solid rgba(48,54,61,.4); display:flex; gap:8px; align-items:flex-start; }
+.think-panel-body .think-step:last-child { border-bottom:none; }
+.think-step-icon { font-size:12px; flex-shrink:0; margin-top:2px; }
+.think-step-text { flex:1; }
+.step-agent { color:var(--primary); font-weight:bold; margin-right:4px; }
+/* ── 中断提问栏 ── */
+.interrupt-bar { display:none; align-items:center; gap:10px; padding:10px 20px; background:#2a1a3a; border-top:1px solid var(--purple); border-bottom:1px solid var(--purple); }
+.interrupt-bar.show { display:flex; }
+.interrupt-bar .interrupt-question { flex:1; font-size:13px; color:var(--purple); }
+.interrupt-bar input { flex:2; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:var(--text); font-size:13px; outline:none; }
+.interrupt-bar input:focus { border-color:var(--purple); }
+.interrupt-bar button { background:var(--purple); color:#fff; border:none; border-radius:8px; padding:8px 16px; font-size:13px; cursor:pointer; }
+.interrupt-bar button:hover { opacity:.85; }
+.interrupt-bar .interrupt-skip { background:transparent; color:var(--muted); border:1px solid var(--border); }
+/* ── 工作流分配面板 ── */
+.workflow-panel { margin:8px 0; background:rgba(88,166,255,.06); border:1px solid var(--border); border-radius:10px; padding:12px 16px; }
+.workflow-panel .wf-title { font-size:12px; color:var(--primary); font-weight:bold; margin-bottom:8px; }
+.workflow-panel .wf-steps { display:flex; flex-wrap:wrap; gap:8px; }
+.workflow-panel .wf-step { display:flex; align-items:center; gap:6px; padding:6px 12px; background:var(--card); border-radius:8px; font-size:12px; }
+.workflow-panel .wf-step .wf-agent { color:var(--primary); font-weight:bold; }
+.workflow-panel .wf-step .wf-role { color:var(--muted); font-size:11px; }
+.workflow-panel .wf-arrow { color:var(--muted); font-size:14px; }
+/* ── 统一输入区 ── */
+.unified-input { padding:14px 24px; border-top:1px solid var(--border); display:flex; gap:10px; align-items:flex-end; background:var(--bg); }
+.unified-input textarea { flex:1; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px 16px; color:var(--text); font-size:14px; resize:none; outline:none; font-family:inherit; min-height:46px; max-height:150px; line-height:1.5; }
+.unified-input textarea:focus { border-color:var(--primary); box-shadow:0 0 0 2px rgba(88,166,255,.15); }
+.unified-input textarea::placeholder { color:var(--muted); }
+.unified-input .input-actions { display:flex; gap:6px; align-items:flex-end; }
+.unified-input .input-actions button { border-radius:10px; padding:10px 16px; font-size:13px; cursor:pointer; border:none; transition:all .2s; white-space:nowrap; }
+.unified-input .btn-send { background:var(--primary); color:#fff; }
+.unified-input .btn-send:hover { opacity:.85; }
+.unified-input .btn-send:disabled { opacity:.4; cursor:not-allowed; }
+.unified-input .btn-pause { background:var(--warn); color:#000; display:none; }
+.unified-input .btn-pause.show { display:block; }
+.unified-input .btn-cancel { background:var(--error); color:#fff; display:none; }
+.unified-input .btn-cancel.show { display:block; }
+.unified-input .mode-select { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 12px; color:var(--text); font-size:12px; outline:none; cursor:pointer; min-width:100px; }
+.unified-input .mode-select:focus { border-color:var(--primary); }
+/* ── 打字指示器 ── */
+.typing-dots { display:flex; gap:4px; padding:4px 0; }
+.typing-dots span { width:8px; height:8px; border-radius:50%; background:var(--muted); animation:bounce 1.2s infinite; }
+.typing-dots span:nth-child(2) { animation-delay:.2s; }
+.typing-dots span:nth-child(3) { animation-delay:.4s; }
 /* 任务面板 */
 .task-panel { padding:24px; min-width:0; }
 .task-panel h2 { color:var(--text-bright); margin-bottom:16px; font-size:18px; }
@@ -480,14 +530,33 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
     </div>
   </div>
 
-  <!-- ===== 对话 ===== -->
-  <div id="tab-chat" class="tab-content">
-    <div class="chat-area" id="chat"></div>
-    <div class="input-area">
-      <div class="slash-dropdown" id="slashDropdown"></div>
-      <textarea id="input" placeholder="输入消息，/ 查看命令，Enter 发送，Shift+Enter 换行" rows="1" oninput="autoResize(this)"></textarea>
-      <label class="btn btn-outline" style="cursor:pointer;padding:8px 12px;margin-right:6px;" title="上传文件">📎<input type="file" id="chatFileInput" style="display:none;" onchange="uploadChatFile(this)"></label>
-      <button id="sendBtn" onclick="sendMessage()">发送</button>
+  <!-- ===== 对话 — 统一大聊天框 ===== -->
+  <div id="tab-chat" class="tab-content active" style="display:flex;">
+    <div class="unified-chat">
+      <div class="unified-messages" id="unifiedChat"></div>
+      <!-- 中断提问栏 -->
+      <div class="interrupt-bar" id="interruptBar">
+        <span class="interrupt-question" id="interruptQuestion"></span>
+        <input id="interruptInput" placeholder="输入你的回答..." onkeydown="if(event.key==='Enter')submitInterrupt()">
+        <button onclick="submitInterrupt()">回复</button>
+        <button class="interrupt-skip" onclick="skipInterrupt()">跳过</button>
+      </div>
+      <!-- 输入区 -->
+      <div class="unified-input">
+        <textarea id="unifiedInput" placeholder="输入消息，Enter 发送，Shift+Enter 换行" rows="1" oninput="autoResizeUnified(this)" onkeydown="handleUnifiedKey(event)"></textarea>
+        <div class="input-actions">
+          <select class="mode-select" id="unifiedMode" title="执行模式">
+            <option value="chat">💬 对话</option>
+            <option value="single">👤 单Agent</option>
+            <option value="parallel">⚡ 并行</option>
+            <option value="pipeline">🔗 流水线</option>
+            <option value="collaborative">🤝 协作</option>
+          </select>
+          <button class="btn-send" id="unifiedSendBtn" onclick="sendUnified()">发送</button>
+          <button class="btn-pause" id="unifiedPauseBtn" onclick="pauseExecution()">⏸</button>
+          <button class="btn-cancel" id="unifiedCancelBtn" onclick="cancelExecution()">✕</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -923,48 +992,13 @@ async function refreshAgentCombo() {
   } catch(e) {}
 }
 
-// ==================== 斜杠命令 ====================
-const chatEl = $('chat'), inputEl = $('input'), sendBtn = $('sendBtn'), slashDropdown = $('slashDropdown');
-let isStreaming = false, currentAgentBubble = null, currentToolCards = {};
-let commandsCache = [], slashActiveIdx = -1;
+// ==================== 统一大聊天框 ====================
+let unifiedStreaming = false;
+let unifiedAbortController = null;
+let currentUnifiedMsg = null;
+let unifiedFullText = '';
+let currentTaskId = null;
 
-async function loadCommands() {
-  try { const d = await api('/api/commands'); commandsCache = d.commands||[]; } catch(e) { commandsCache=[]; }
-}
-
-function showSlashDropdown() {
-  const text = inputEl.value;
-  if(!text.startsWith('/')) { slashDropdown.classList.remove('show'); return; }
-  const prefix = text.split(' ')[0].toLowerCase();
-  const filtered = commandsCache.filter(c => c.cmd.toLowerCase().startsWith(prefix));
-  if(filtered.length===0) { slashDropdown.classList.remove('show'); return; }
-  slashDropdown.innerHTML = filtered.map((c,i) =>
-    `<div class="slash-item" data-idx="${i}"><span class="slash-cmd">${c.cmd}</span><span class="slash-desc">${c.desc}</span>${c.args?`<span class="slash-args">${c.args}</span>`:''}</div>`
-  ).join('');
-  slashDropdown.classList.add('show'); slashActiveIdx = -1;
-  slashDropdown.querySelectorAll('.slash-item').forEach(el => {
-    el.addEventListener('mousedown', e => {
-      e.preventDefault();
-      const cmd = filtered[parseInt(el.dataset.idx)];
-      inputEl.value = cmd.cmd + (cmd.args?' ':'');
-      slashDropdown.classList.remove('show'); inputEl.focus(); autoResize(inputEl);
-    });
-  });
-}
-function navSlash(key) {
-  const items = slashDropdown.querySelectorAll('.slash-item');
-  if(!items.length) return;
-  slashActiveIdx = key==='ArrowDown' ? Math.min(slashActiveIdx+1,items.length-1) : Math.max(slashActiveIdx-1,-1);
-  items.forEach((el,i) => el.classList.toggle('active',i===slashActiveIdx));
-  if(slashActiveIdx>=0&&items[slashActiveIdx]) items[slashActiveIdx].scrollIntoView({block:'nearest'});
-}
-function selectSlash() {
-  const items = slashDropdown.querySelectorAll('.slash-item');
-  if(slashActiveIdx>=0&&items[slashActiveIdx]) { items[slashActiveIdx].click(); return true; }
-  return false;
-}
-
-// ==================== 聊天 ====================
 async function toggleMode(mode) {
   try {
     const data = await api('/api/toggle_mode', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});
@@ -973,33 +1007,6 @@ async function toggleMode(mode) {
     if(mode==='reflection') $('toggleReflect').checked = data.enabled;
   } catch(e) {}
 }
-
-function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,150)+'px'; }
-
-if (inputEl) {
-inputEl.addEventListener('keydown', e => {
-  if(slashDropdown.classList.contains('show')) {
-    if(e.key==='ArrowDown'||e.key==='ArrowUp') { e.preventDefault(); navSlash(e.key); return; }
-    if(e.key==='Enter') { if(selectSlash()) { e.preventDefault(); return; } slashDropdown.classList.remove('show'); }
-    if(e.key==='Escape') { slashDropdown.classList.remove('show'); return; }
-  }
-  if(e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); sendMessage(); }
-});
-inputEl.addEventListener('input', () => {
-  if(inputEl.value.startsWith('/')) showSlashDropdown(); else slashDropdown.classList.remove('show');
-});
-}
-
-function scrollBottom() { chatEl.scrollTop = chatEl.scrollHeight; }
-
-function addBubble(role, content, id) {
-  const div = document.createElement('div');
-  div.className = 'message ' + role;
-  div.id = id || '';
-  div.innerHTML = `<div class="avatar">${role==='user'?'U':'AI'}</div><div class="bubble">${content}</div>`;
-  chatEl.appendChild(div); scrollBottom(); return div;
-}
-function updateBubble(el, html) { el.querySelector('.bubble').innerHTML = html; scrollBottom(); }
 
 function renderMarkdown(text) {
   var html = text
@@ -1027,51 +1034,284 @@ function renderMarkdown(text) {
   return html;
 }
 
-function addToolCard(callId, name, args) {
+function autoResizeUnified(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,150)+'px'; }
+
+function handleUnifiedKey(e) {
+  if(e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); sendUnified(); }
+}
+
+function scrollUnified() {
+  const el = $('unifiedChat');
+  if(el) el.scrollTop = el.scrollHeight;
+}
+
+function addUnifiedMsg(role, agentName) {
+  const div = document.createElement('div');
+  div.className = 'unified-msg ' + role;
+  const now = new Date().toLocaleTimeString('zh-CN');
+  const badgeCls = role === 'user' ? 'user-badge' : 'agent-badge';
+  const badgeText = role === 'user' ? '你' : (agentName || 'AI');
+  div.innerHTML = `<div class="msg-header">
+    <span class="msg-agent-badge ${badgeCls}">${escHtml(badgeText)}</span>
+    <span class="msg-time">${now}</span>
+  </div>
+  <div class="msg-body"></div>`;
+  $('unifiedChat').appendChild(div);
+  scrollUnified();
+  return div;
+}
+
+function addThinkStep(agentName, icon, text) {
+  let body = document.getElementById('thinkBody_' + agentName);
+  if (!body) {
+    const panel = document.createElement('div');
+    panel.className = 'think-panel';
+    panel.innerHTML = `<div class="think-panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
+      <span class="think-icon">🧠</span><span class="think-label">思考过程</span>
+      <span class="think-agent">${escHtml(agentName)}</span><span class="think-toggle">▼</span>
+    </div><div class="think-panel-body" id="thinkBody_${agentName}"></div>`;
+    $('unifiedChat').appendChild(panel);
+    scrollUnified();
+    body = panel.querySelector('.think-panel-body');
+  }
+  const step = document.createElement('div');
+  step.className = 'think-step';
+  step.innerHTML = `<span class="think-step-icon">${icon}</span><div class="think-step-text"><span class="step-agent">${escHtml(agentName)}</span>: ${escHtml(text)}</div>`;
+  body.appendChild(step);
+  body.scrollTop = body.scrollHeight;
+  scrollUnified();
+}
+
+function addWorkflowPanel(workflow) {
+  if (!workflow || workflow.length === 0) return;
+  const panel = document.createElement('div');
+  panel.className = 'workflow-panel';
+  let stepsHtml = workflow.map((w, i) => {
+    const arrow = i < workflow.length - 1 ? '<span class="wf-arrow">→</span>' : '';
+    return `<div class="wf-step"><span class="wf-agent">${escHtml(w.agent)}</span><span class="wf-role">${escHtml(w.role||w.task||'')}</span></div>${arrow}`;
+  }).join('');
+  panel.innerHTML = `<div class="wf-title">📋 工作流分配</div><div class="wf-steps">${stepsHtml}</div>`;
+  $('unifiedChat').appendChild(panel);
+  scrollUnified();
+}
+
+function addUnifiedToolCard(msgEl, callId, name, args) {
   const card = document.createElement('div');
   card.className = 'tool-call-card'; card.id = 'tool-'+callId;
-  card.innerHTML = `<div class="tool-name">调用工具: ${name}</div><div class="tool-args">参数: ${args}</div><div class="result-preview" style="display:none"></div>`;
-  if(currentAgentBubble) currentAgentBubble.querySelector('.bubble').appendChild(card);
-  currentToolCards[callId] = card; scrollBottom();
-}
-function updateToolResult(callId, success, result) {
-  const card = currentToolCards[callId]; if(!card) return;
-  card.classList.add(success?'success':'');
-  const p = card.querySelector('.result-preview'); p.style.display='block';
-  p.textContent = (success?'OK: ':'FAIL: ') + result; scrollBottom();
+  card.innerHTML = `<div class="tool-name">🔧 ${escHtml(name)}</div>
+    <div class="tool-args">${escHtml(typeof args === 'string' ? args : JSON.stringify(args))}</div>
+    <div class="result-preview" style="display:none"></div>`;
+  msgEl.querySelector('.msg-body').appendChild(card);
+  scrollUnified();
+  return card;
 }
 
-async function sendMessage() {
-  const text = inputEl.value.trim();
-  if(!text||isStreaming) return;
-  addBubble('user', text); inputEl.value=''; inputEl.style.height='auto'; slashDropdown.classList.remove('show');
+function updateUnifiedToolResult(callId, success, result) {
+  const card = document.getElementById('tool-' + callId);
+  if (!card) return;
+  card.classList.add(success ? 'success' : '');
+  const p = card.querySelector('.result-preview');
+  p.style.display = 'block';
+  p.textContent = (success ? '✅ ' : '❌ ') + String(result || '').slice(0, 300);
+  scrollUnified();
+}
 
-  // 拼接上传文件上下文
-  let messageWithFiles = text;
-  if (chatUploadedFiles.length > 0) {
-    messageWithFiles += '\n\n[用户上传的文件: ' + chatUploadedFiles.join(', ') + ']';
-    chatUploadedFiles = [];
-  }
+async function sendUnified() {
+  const text = $('unifiedInput').value.trim();
+  if (!text || unifiedStreaming) return;
+  const mode = $('unifiedMode').value;
+  addUnifiedMsg('user', '').querySelector('.msg-body').innerHTML = escHtml(text);
+  $('unifiedInput').value = '';
+  $('unifiedInput').style.height = 'auto';
+  unifiedStreaming = true;
+  $('unifiedSendBtn').disabled = true;
+  $('unifiedPauseBtn').classList.add('show');
+  $('unifiedCancelBtn').classList.add('show');
+  if (mode === 'chat') await executeUnifiedChat(text);
+  else if (mode === 'single') await executeUnifiedSingle(text);
+  else await executeUnifiedOrchestrate(text);
+  unifiedStreaming = false;
+  $('unifiedSendBtn').disabled = false;
+  $('unifiedPauseBtn').classList.remove('show');
+  $('unifiedCancelBtn').classList.remove('show');
+  $('unifiedInput').focus();
+}
 
-  isStreaming=true; sendBtn.disabled=true;
-  currentAgentBubble = addBubble('agent','<div class="typing-indicator"><span></span><span></span><span></span></div>','agent-msg');
-  currentToolCards = {}; let fullText='';
+async function executeUnifiedChat(text) {
+  currentUnifiedMsg = addUnifiedMsg('agent', 'SmartAgent');
+  currentUnifiedMsg.querySelector('.msg-body').innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+  unifiedFullText = '';
+  unifiedAbortController = new AbortController();
   try {
-    const resp = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json',...apiHeaders()},body:JSON.stringify({message:messageWithFiles})});
+    const resp = await fetch('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+      body: JSON.stringify({ message: text }), signal: unifiedAbortController.signal
+    });
     const reader = resp.body.getReader(); const decoder = new TextDecoder();
-    while(true) {
-      const {done,value} = await reader.read(); if(done) break;
-      for(const line of decoder.decode(value,{stream:true}).split('\n')) {
-        if(!line.startsWith('data: ')) continue;
-        const data = JSON.parse(line.slice(6));
-        if(data.type==='text') { fullText+=data.content; updateBubble(currentAgentBubble,renderMarkdown(fullText)); }
-        else if(data.type==='tool_call') addToolCard(data.call_id,data.name,JSON.stringify(data.arguments,null,2));
-        else if(data.type==='tool_result') updateToolResult(data.call_id,data.success,String(data.result||data.error||'').slice(0,300));
-        else if(data.type==='done') $('stat-turns').textContent = parseInt($('stat-turns').textContent)+1;
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      for (const line of decoder.decode(value, { stream: true }).split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        try { const data = JSON.parse(line.slice(6)); handleUnifiedEvent(data); } catch (e) { }
       }
     }
-  } catch(err) { updateBubble(currentAgentBubble,'<span style="color:#e74c3c">请求失败: '+err.message+'</span>'); }
-  isStreaming=false; sendBtn.disabled=false; inputEl.focus();
+  } catch (err) {
+    if (err.name !== 'AbortError') currentUnifiedMsg.querySelector('.msg-body').innerHTML = '<span style="color:var(--error)">请求失败: ' + escHtml(err.message) + '</span>';
+  }
+  unifiedAbortController = null;
+}
+
+async function executeUnifiedSingle(text) {
+  currentUnifiedMsg = addUnifiedMsg('agent', '编排执行');
+  currentUnifiedMsg.querySelector('.msg-body').innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+  unifiedFullText = '';
+  unifiedAbortController = new AbortController();
+  try {
+    const resp = await fetch('/api/tasks/orchestrate/stream', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+      body: JSON.stringify({ description: text, title: text.slice(0, 50), mode: 'single', agent_names: [] }),
+      signal: unifiedAbortController.signal
+    });
+    const reader = resp.body.getReader(); const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      for (const line of decoder.decode(value, { stream: true }).split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        try { const data = JSON.parse(line.slice(6)); handleOrchUnifiedEvent(data); } catch (e) { }
+      }
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') currentUnifiedMsg.querySelector('.msg-body').innerHTML = '<span style="color:var(--error)">请求失败: ' + escHtml(err.message) + '</span>';
+  }
+  unifiedAbortController = null;
+}
+
+async function executeUnifiedOrchestrate(text) {
+  const mode = $('unifiedMode').value;
+  currentUnifiedMsg = addUnifiedMsg('agent', '编排执行');
+  currentUnifiedMsg.querySelector('.msg-body').innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+  unifiedFullText = '';
+  unifiedAbortController = new AbortController();
+  try {
+    const resp = await fetch('/api/tasks/orchestrate/stream', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+      body: JSON.stringify({ description: text, title: text.slice(0, 50), mode: mode, agent_names: [] }),
+      signal: unifiedAbortController.signal
+    });
+    const reader = resp.body.getReader(); const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      for (const line of decoder.decode(value, { stream: true }).split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        try { const data = JSON.parse(line.slice(6)); handleOrchUnifiedEvent(data); } catch (e) { }
+      }
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') currentUnifiedMsg.querySelector('.msg-body').innerHTML = '<span style="color:var(--error)">请求失败: ' + escHtml(err.message) + '</span>';
+  }
+  unifiedAbortController = null;
+}
+
+function handleUnifiedEvent(data) {
+  const agentName = data.agent_name || 'SmartAgent';
+  if (data.type === 'agent_think') {
+    if (data.status === 'started') addThinkStep(agentName, '💭', '开始思考...');
+    else if (data.status === 'ended') addThinkStep(agentName, '✅', '思考完成');
+  } else if (data.type === 'text') {
+    unifiedFullText += data.content;
+    currentUnifiedMsg.querySelector('.msg-body').innerHTML = renderMarkdown(unifiedFullText);
+    scrollUnified();
+  } else if (data.type === 'tool_call') {
+    addThinkStep(agentName, '🔧', '调用工具: ' + data.name);
+    addUnifiedToolCard(currentUnifiedMsg, data.call_id, data.name, data.arguments);
+  } else if (data.type === 'tool_result') {
+    updateUnifiedToolResult(data.call_id, data.success, data.result);
+    addThinkStep(agentName, data.success ? '✅' : '❌', '工具结果: ' + String(data.result || '').slice(0, 100));
+  } else if (data.type === 'done') { /* done */ }
+  else if (data.type === 'error') {
+    currentUnifiedMsg.querySelector('.msg-body').innerHTML += '<div style="color:var(--error);margin-top:8px;">错误: ' + escHtml(data.content) + '</div>';
+  }
+}
+
+function handleOrchUnifiedEvent(data) {
+  const stage = data.stage; const info = data.info || {};
+  if (stage === 'start') {
+    const mode = data.mode || 'auto'; const agents = data.agents || [];
+    currentUnifiedMsg.querySelector('.msg-body').innerHTML =
+      `<div style="color:var(--primary);font-weight:bold;">🚀 编排启动 — 模式: ${mode.toUpperCase()}</div>
+       <div style="color:var(--muted);font-size:12px;margin-top:4px;">参与 Agent: ${agents.join(', ') || '自动选择'}</div>`;
+  } else if (stage === 'mode_detected') {
+    currentUnifiedMsg.querySelector('.msg-body').innerHTML +=
+      `<div style="margin-top:8px;"><span class="orch-mode-badge ${data.mode}" style="font-size:10px;padding:2px 8px;">${data.mode.toUpperCase()}</span> <span style="font-size:12px;color:var(--muted);">${escHtml(data.reason||'')}</span></div>`;
+  } else if (stage === 'stage_workflow_alloc') {
+    addWorkflowPanel(info.workflow || []);
+  } else if (stage === 'stage_agent_think_start') {
+    addThinkStep(info.agent || 'Agent', '💭', '开始思考...');
+  } else if (stage === 'stage_agent_think_end') {
+    addThinkStep(info.agent || 'Agent', '✅', '思考完成');
+  } else if (stage === 'stage_agent_start') {
+    addThinkStep(info.agent || 'Agent', '▶️', `开始工作 (第${info.index||1}/${info.total||1}个)`);
+  } else if (stage === 'stage_agent_done') {
+    addThinkStep(info.agent || 'Agent', '✅', '完成工作');
+  } else if (stage === 'stage_agent_error') {
+    addThinkStep(info.agent || 'Agent', '❌', '出错: ' + (info.error || ''));
+  } else if (stage === 'done') {
+    const result = data.result || {};
+    if (result.final_result) {
+      currentUnifiedMsg.querySelector('.msg-body').innerHTML +=
+        `<div style="margin-top:12px;padding:12px;background:rgba(63,185,80,.08);border-radius:8px;border-left:3px solid var(--success);">
+          <div style="font-weight:bold;color:var(--success);margin-bottom:6px;">📝 执行结果</div>
+          <div style="white-space:pre-wrap;">${renderMarkdown(String(result.final_result||'').slice(0, 2000))}</div>
+        </div>`;
+    }
+    if (result.output_files && result.output_files.length > 0) {
+      const fileLinks = result.output_files.map(f => {
+        const fname = (f||'').split('/').pop() || f;
+        return `<a href="/api/files/download?file=${encodeURIComponent(f)}" class="file-attach-card">📁 ${escHtml(fname)}</a>`;
+      }).join(' ');
+      currentUnifiedMsg.querySelector('.msg-body').innerHTML += `<div style="margin-top:8px;">${fileLinks}</div>`;
+    }
+    scrollUnified();
+  } else if (stage === 'error') {
+    currentUnifiedMsg.querySelector('.msg-body').innerHTML +=
+      `<div style="color:var(--error);margin-top:8px;">❌ 执行失败: ${escHtml(data.error||'')}</div>`;
+  }
+}
+
+function pauseExecution() {
+  if (unifiedAbortController) {
+    $('interruptBar').classList.add('show');
+    $('interruptQuestion').textContent = 'Agent 正在执行中，你想暂停询问什么？';
+    $('interruptInput').focus();
+  }
+}
+
+function submitInterrupt() {
+  const answer = $('interruptInput').value.trim();
+  $('interruptInput').value = '';
+  $('interruptBar').classList.remove('show');
+  if (answer && currentTaskId) {
+    api('/api/chat/interrupt-reply', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+      body: JSON.stringify({ task_id: currentTaskId, answer: answer })
+    });
+  }
+}
+
+function skipInterrupt() {
+  $('interruptInput').value = '';
+  $('interruptBar').classList.remove('show');
+}
+
+function cancelExecution() {
+  if (unifiedAbortController) {
+    unifiedAbortController.abort();
+    unifiedAbortController = null;
+  }
+  unifiedStreaming = false;
+  $('unifiedSendBtn').disabled = false;
+  $('unifiedPauseBtn').classList.remove('show');
+  $('unifiedCancelBtn').classList.remove('show');
 }
 
 // ==================== 任务发布模态框 ====================
@@ -2723,6 +2963,40 @@ async def api_chat(req: ChatRequest, current_user = Depends(get_current_user)):
     )
 
 
+# 中断状态存储（内存中，key=task_id）
+_interrupt_states: dict[str, asyncio.Event] = {}
+_interrupt_answers: dict[str, str] = {}
+
+
+@app.post("/api/chat/interrupt-reply")
+async def api_interrupt_reply(req: dict, current_user = Depends(get_current_user)):
+    """Agent 中断后用户回复"""
+    task_id = req.get("task_id", "")
+    answer = req.get("answer", "")
+    _interrupt_answers[task_id] = answer
+    if task_id in _interrupt_states:
+        _interrupt_states[task_id].set()
+    return {"ok": True}
+
+
+@app.get("/api/prompt-template")
+async def api_prompt_template(current_user = Depends(get_current_user)):
+    """返回五板块提示词模板"""
+    from src.core.config import get_config
+    cfg = get_config()
+    return {
+        "ok": True,
+        "template": cfg.prompt_template,
+        "sections": [
+            {"key": "role_definition", "label": "角色定义", "desc": "明确智能体的身份和行为风格。例如，"你是一名专业的旅游规划师，擅长根据用户需求调整行程方案"。"},
+            {"key": "core_objectives", "label": "核心目标", "desc": "用具体、可衡量的语言描述任务目标。例如，"确保客户订单从付款到发货的全流程跟踪"。"},
+            {"key": "behavior_rules", "label": "行为规则", "desc": "定义智能体的思考逻辑和交互规则。例如，"首次联系客户时需自我介绍并说明目的"。"},
+            {"key": "resource_calls", "label": "资源调用", "desc": "明确智能体可使用的工具和数据。例如，"可访问物流API，但不可调用客户隐私信息"。"},
+            {"key": "error_handling", "label": "容错机制", "desc": "规定异常情况的处理方式。例如，"若调用API失败，重试3次后切换备用接口"。"},
+        ],
+    }
+
+
 # ============================================================
 # 任务管理 API
 # ============================================================
@@ -2756,8 +3030,8 @@ class OrchestrateTaskRequest(BaseModel):
     description: str = Field(..., min_length=1, description="任务描述")
     title: str = Field("", description="任务标题")
     mode: str = Field("auto", description="执行模式: single / parallel / pipeline / collaborative / auto")
-    agent_names: list[str] | None = Field(None, description="指定 Agent 列表（可选）")
-    agent_names: list[str] = []           # 指定参与 Agent，空=自动选择空闲
+    agent_names: list[str] = Field(default_factory=list, description="指定参与 Agent，空=自动选择空闲")
+    use_llm_allocation: bool = Field(False, description="是否使用 LLM 驱动的工作流分配（实验性）")
 
 
 @app.post("/api/tasks/orchestrate")
@@ -2774,6 +3048,7 @@ async def api_orchestrate_task(req: OrchestrateTaskRequest, current_user = Depen
         title=req.title,
         mode=req.mode,
         agent_names=req.agent_names or None,
+        use_llm_allocation=req.use_llm_allocation,
     )
     return {"ok": result.success, "result": result.to_dict()}
 
@@ -2853,6 +3128,7 @@ async def api_orchestrate_task_stream(request: Request, req: OrchestrateTaskRequ
                 mode=detected_mode,
                 agent_names=req.agent_names or None,
                 on_progress=on_progress,
+                use_llm_allocation=req.use_llm_allocation,
             )
             asyncio.run_coroutine_threadsafe(
                 event_queue.put({"stage": "done", "result": result.to_dict()}), loop
