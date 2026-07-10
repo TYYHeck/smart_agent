@@ -117,6 +117,10 @@ def _resolve_path(filepath: str) -> str:
         base = cfg.tools.output_dir
     except Exception:
         base = "./output"
+    # 避免路径重复拼接：如果 filepath 已经以 base 开头则不重复
+    base_norm = os.path.normpath(base)
+    if filepath.startswith(base_norm + os.sep) or filepath.startswith(base_norm + "/"):
+        return filepath
     return os.path.join(base, filepath)
 
 
@@ -205,6 +209,8 @@ _SAFE_BUILTINS = {
     "round": round, "set": set, "slice": slice, "sorted": sorted,
     "str": str, "sum": sum, "tuple": tuple, "type": type, "zip": zip,
     "isinstance": isinstance, "True": True, "False": False, "None": None,
+    # 关键：import 语句最终调用 builtins.__import__，必须注入安全版本
+    "__import__": _safe_import,
 }
 
 _SAFE_MODULES = {
