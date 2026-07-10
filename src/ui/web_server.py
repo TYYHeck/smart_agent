@@ -797,13 +797,12 @@ async function batchDeleteFiles() {
   const paths = Array.from(checked).map(cb => cb.dataset.filePath);
   if (!confirm('确认永久删除 ' + paths.length + ' 个文件？此操作不可恢复。')) return;
   try {
-    const resp = await fetch('/api/files/batch-delete', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+    const data = await api('/api/files/batch-delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ files: paths })
     });
-    const data = await resp.json();
     if (data.ok) { loadOutputFiles(); alert('成功删除 ' + data.deleted + ' 个文件'); }
-    else { alert('批量删除失败: ' + (data.detail || '未知错误')); }
+    else { alert('批量删除失败: ' + (data.detail || data.error || '未知错误')); }
   } catch(e) { alert('删除出错: ' + e.message); }
 }
 
@@ -1649,11 +1648,10 @@ async function batchDeleteTasks() {
   const ids = Array.from(checked).map(cb => cb.dataset.taskId);
   if (!confirm('确认永久删除 ' + ids.length + ' 个任务？此操作不可恢复。')) return;
   try {
-    const resp = await fetch('/api/tasks/batch-delete', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+    const data = await api('/api/tasks/batch-delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task_ids: ids })
     });
-    const data = await resp.json();
     if (data.ok) { refreshTasks(''); loadDashboard(); }
     else { alert('批量删除失败: ' + (data.error || '未知错误')); }
   } catch(e) { alert('删除出错: ' + e.message); }
