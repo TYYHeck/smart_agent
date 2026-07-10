@@ -2190,25 +2190,26 @@ function showEditAgentModal(name) {
            <input type="checkbox" id="eaReflection"${refChk}> 反思模式
          </label>
        </div>`,
-      async () => {
-        const newName = $('eaName').value.trim();
-        if (!newName) { alert('名称不能为空'); return; }
-        const skills = $('eaSkills').value.split(',').map(s=>s.trim()).filter(Boolean);
-        const payload = {
-          name: newName,
-          skills, description: $('eaDesc').value,
-          system_prompt: $('eaPrompt').value,
-          max_iterations: parseInt($('eaMaxIter').value) || 15,
-          enable_planning: $('eaPlanning').checked,
-          enable_rag: $('eaRag').checked,
-          enable_reflection: $('eaReflection').checked,
-        };
-        await api('/api/agents/' + encodeURIComponent(name) + '/update', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        loadAgents(); refreshAgentCombo();
-      }, '保存'
+     async () => {
+       const newName = $('eaName').value.trim();
+       if (!newName) { alert('名称不能为空'); return; }
+       const skills = $('eaSkills').value.split(',').map(s=>s.trim()).filter(Boolean);
+       const payload = {
+         name: newName,
+         skills, description: $('eaDesc').value,
+         system_prompt: $('eaPrompt').value,
+         max_iterations: parseInt($('eaMaxIter').value) || 15,
+         enable_planning: $('eaPlanning').checked,
+         enable_rag: $('eaRag').checked,
+         enable_reflection: $('eaReflection').checked,
+       };
+       const res = await api('/api/agents/' + encodeURIComponent(name) + '/update', {
+         method: 'POST', headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify(payload)
+       });
+       if (!res.ok) { alert('保存失败: ' + (res.error || '未知错误')); return; }
+       loadAgents(); refreshAgentCombo();
+     }, '保存'
     );
     // ── 字数统计 ──
     setTimeout(() => {
@@ -4004,6 +4005,7 @@ async def api_update_agent(name: str, req: UpdateAgentRequest, current_user = De
 
     # 改名：从旧 key 迁移到新 key
     new_name = (req.name or '').strip() or name
+    old_name = name  # 记录旧名，用于后续清理 DB 旧记录
     if new_name != name:
         if new_name in tm._agents:
             return JSONResponse({"ok": False, "error": f"Agent '{new_name}' 已存在"}, status_code=409)
@@ -4041,6 +4043,20 @@ async def api_update_agent(name: str, req: UpdateAgentRequest, current_user = De
         enable_rag=getattr(agent, 'enable_rag', True) if getattr(agent, 'enable_rag', True) is not None else True,
         enable_reflection=getattr(agent, 'enable_reflection', False) or False,
     )
+
+    # 改名后删除旧数据库记录，防止重启后出现重复 Agent
+    if new_name != old_name:
+        try:
+            from src.infrastructure.database import _session_factory
+            from src.infrastructure.models import AgentConfigModel
+            if _session_factory is not None:
+                async with _session_factory() as session:
+                    old_cfg = await session.get(AgentConfigModel, old_name)
+                    if old_cfg:
+                        await session.delete(old_cfg)
+                        await session.commit()
+        except Exception:
+            pass
 
     return {"ok": True, "agent": proxy.to_dict()}
 
