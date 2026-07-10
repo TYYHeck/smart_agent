@@ -703,7 +703,7 @@ class Agent:
 
         LangChain 1.x 中:
           - graph.invoke({"messages": [...]}) 同步执行
-          - recursion_limit 控制最大步数（每个迭代约 2 步: model + tool）
+          - recursion_limit 控制最大步数（每个迭代可能 model + tool + 反思等多步）
           - 返回 {"messages": [...]}，最后一条 AIMessage 包含最终答案
         """
         # 构建消息列表
@@ -722,10 +722,10 @@ class Agent:
         # 对话历史已由 LangChain 的 system_prompt 管理，
         # agent graph 自动维护消息列表
 
-        # 估算 recursion_limit: 每个迭代 = 1 次 model call + 可能的 tool call
-        # 安全值: max_iterations * 3
+        # 估算 recursion_limit: 每个迭代可能包含 model call + tool call + 反思等多步
+        # 安全值: max_iterations * 6（足够应对复杂工具调用链）
         config: dict[str, Any] = {
-            "recursion_limit": self.max_iterations * 3,
+            "recursion_limit": self.max_iterations * 6,
             "configurable": {"thread_id": self._thread_id},
         }
         if self._callback_handler:
@@ -842,7 +842,7 @@ class Agent:
         try:
             input_messages: list[BaseMessage] = [HumanMessage(content=task)]
             config = RunnableConfig(
-                recursion_limit=self.max_iterations * 3,
+                recursion_limit=self.max_iterations * 6,
                 callbacks=[self._callback_handler] if self._callback_handler else None,
             )
 
@@ -934,7 +934,7 @@ class Agent:
                 input_messages.append(HumanMessage(content=task))
 
             config: dict[str, Any] = {
-                "recursion_limit": self.max_iterations * 3,
+                "recursion_limit": self.max_iterations * 6,
                 "configurable": {"thread_id": self._thread_id},
             }
             if self._callback_handler:
