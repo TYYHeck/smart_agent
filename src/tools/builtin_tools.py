@@ -199,20 +199,6 @@ def write_file(filepath: str, content: str) -> str:
 # 4. Python 代码执行 (沙箱受限)
 # ============================================================
 
-# 安全的运算符和环境
-_SAFE_BUILTINS = {
-    "abs": abs, "all": all, "any": any, "bool": bool, "chr": chr,
-    "dict": dict, "divmod": divmod, "enumerate": enumerate,
-    "filter": filter, "float": float, "int": int, "len": len,
-    "list": list, "map": map, "max": max, "min": min, "ord": ord,
-    "pow": pow, "print": print, "range": range, "reversed": reversed,
-    "round": round, "set": set, "slice": slice, "sorted": sorted,
-    "str": str, "sum": sum, "tuple": tuple, "type": type, "zip": zip,
-    "isinstance": isinstance, "True": True, "False": False, "None": None,
-    # 关键：import 语句最终调用 builtins.__import__，必须注入安全版本
-    "__import__": _safe_import,
-}
-
 _SAFE_MODULES = {
     "math", "json", "re", "datetime", "collections", "itertools",
     "functools", "random", "statistics", "decimal", "fractions",
@@ -229,6 +215,21 @@ def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
     if name in _SAFE_MODULES:
         return __import__(name, globals, locals, fromlist, level)
     raise ImportError(f"不允许导入模块: {name}")
+
+
+# 安全的运算符和环境
+_SAFE_BUILTINS = {
+    "abs": abs, "all": all, "any": any, "bool": bool, "chr": chr,
+    "dict": dict, "divmod": divmod, "enumerate": enumerate,
+    "filter": filter, "float": float, "int": int, "len": len,
+    "list": list, "map": map, "max": max, "min": min, "ord": ord,
+    "pow": pow, "print": print, "range": range, "reversed": reversed,
+    "round": round, "set": set, "slice": slice, "sorted": sorted,
+    "str": str, "sum": sum, "tuple": tuple, "type": type, "zip": zip,
+    "isinstance": isinstance, "True": True, "False": False, "None": None,
+    # 关键：import 语句最终调用 builtins.__import__，必须注入安全版本
+    "__import__": _safe_import,
+}
 
 
 @tool(description="在沙箱中执行 Python 代码，返回 stdout 输出。支持 math/json/re 等安全库。禁止死循环/无限递归，5秒超时。",
