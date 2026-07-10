@@ -3362,18 +3362,35 @@ def _safe_file_path(filepath: str) -> str | None:
     """
     安全检查：确保文件路径在 output_dir 内。
     返回绝对路径，不安全则返回 None。
+    兼容前端可能传来带冗余前缀的路径（如 output/xxx 而 output_dir 已包含 output）。
     """
     output_dir = _get_output_dir()
-    abs_path = _os.path.abspath(
-        filepath if _os.path.isabs(filepath)
-        else _os.path.join(output_dir, filepath)
-    )
-    # 规范化路径防止目录穿越
-    real_path = _os.path.realpath(abs_path)
     real_output = _os.path.realpath(output_dir)
-    if not real_path.startswith(real_output + _os.sep) and real_path != real_output:
-        return None
-    return real_path
+
+    def _resolve(p: str) -> str:
+        abs_path = _os.path.abspath(
+            p if _os.path.isabs(p) else _os.path.join(output_dir, p)
+        )
+        return _os.path.realpath(abs_path)
+
+    candidates = [filepath]
+
+    # 如果路径以 output_dir 的目录名 + "/" 开头（如 output/），可能是冗余前缀
+    base = _os.path.basename(output_dir)
+    prefix = base + "/"
+    if filepath.startswith(prefix) and not _os.path.isabs(filepath):
+        candidates.append(filepath[len(prefix):])
+
+    first_valid = None
+    for cand in candidates:
+        real_path = _resolve(cand)
+        if real_path.startswith(real_output + _os.sep) or real_path == real_output:
+            if _os.path.isfile(real_path):
+                return real_path  # 文件存在，直接返回
+            if first_valid is None:
+                first_valid = real_path  # 记下第一个合法路径
+
+    return first_valid  # 都不存在时返回第一个合法路径，或 None
 
 
 def _list_output_files(task_id: str = "") -> list[dict]:
