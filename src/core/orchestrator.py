@@ -24,6 +24,8 @@ from typing import Optional, Callable
 from datetime import datetime
 import threading
 import logging
+import json
+import re
 
 from .task_manager import TaskManager, Task, AgentProxy, TaskStatus, _current_task_id
 
@@ -181,6 +183,98 @@ class ModeDetector:
 
 
 # ============================================================
+# LLM 驱动的工作流分配器
+# ============================================================
+
+class LLMWorkflowAllocator:
+    """让 LLM 分析任务并分配工作流 —— 非硬编码，完全由提示词驱动"""
+
+    ALLOCATION_PROMPT = """你是一个智能任务分配器。请分析以下任务，决定最佳执行策略。
+
+可用 Agent 列表及其能力：
+{agent_descriptions}
+
+任务描述：
+{task_description}
+
+请按以下 JSON 格式返回分配方案：
+```json
+{{
+    "mode": "single|parallel|pipeline|collaborative",
+    "reason": "选择此模式的理由（一句话）",
+    "agents": ["Agent名称1", "Agent名称2"],
+    "workflow": [
+        {{"agent": "Agent名称", "role": "该Agent在流程中的角色", "task": "分配给该Agent的具体子任务"}}
+    ],
+    "collaboration_notes": "协作注意事项（如流水线传递规则、讨论重点等）"
+}}
+```
+
+规则：
+1. mode: 简单任务用 single，多角度分析用 parallel，多步骤用 pipeline，决策评估用 collaborative
+2. agents: 按任务需求选择最合适的 Agent，不要选无关的
+3. workflow: 详细描述每个 Agent 的分工，pipeline 模式要注明数据流转
+4. 用中文描述"""
+
+    @classmethod
+    def allocate(cls, task_description: str, agents_info: list[dict], llm=None) -> dict:
+        """
+        使用 LLM 智能分配工作流
+        
+        Args:
+            task_description: 任务描述
+            agents_info: [{"name": "xxx", "skills": [...], "description": "..."}, ...]
+            llm: LLM 实例（如未提供则回退到关键词匹配）
+        
+        Returns:
+            分配方案 dict
+        """
+        if llm is None:
+            # 回退到关键词模式检测
+            mode, reason = ModeDetector.detect(task_description)
+            return {
+                "mode": mode.value,
+                "reason": reason,
+                "agents": [a["name"] for a in agents_info],
+                "workflow": [],
+                "collaboration_notes": "关键词模式检测（未启用 LLM 驱动）",
+            }
+
+        # 构建 Agent 描述
+        desc_lines = []
+        for a in agents_info:
+            skills_str = ", ".join(a.get("skills", ["通用"]))
+            desc = a.get("description", "通用AI助手")
+            desc_lines.append(f"- **{a['name']}**: 技能=[{skills_str}], 描述={desc}")
+        agent_descriptions = "\n".join(desc_lines)
+
+        prompt = cls.ALLOCATION_PROMPT.format(
+            agent_descriptions=agent_descriptions,
+            task_description=task_description,
+        )
+
+        try:
+            response = llm.chat(prompt)
+            # 尝试从响应中提取 JSON
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                return json.loads(json_match.group())
+        except Exception as e:
+            logger.warning(f"LLM 工作流分配失败: {e}，回退到关键词匹配")
+
+        # 回退
+        mode, reason = ModeDetector.detect(task_description)
+        return {
+            "mode": mode.value,
+            "reason": reason,
+            "agents": [a["name"] for a in agents_info],
+            "workflow": [],
+            "collaboration_notes": "关键词模式检测（LLM 分配失败，已回退）",
+        }
+
+
+# ============================================================
 # 编排器主类
 # ============================================================
 
@@ -214,6 +308,8 @@ class Orchestrator:
         mode: ExecutionMode = ExecutionMode.AUTO,
         agent_names: list[str] | None = None,
         on_progress: Callable[[str, dict], None] | None = None,
+        use_llm_allocation: bool = False,
+        llm=None,
     ) -> OrchestrationResult:
         """
         执行任务
@@ -223,6 +319,8 @@ class Orchestrator:
             title: 标题
             mode: 执行模式 (AUTO 为自动检测)
             agent_names: 指定参与的 Agent 名称列表 (None=自动选择所有空闲)
+            use_llm_allocation: 是否使用 LLM 智能分配工作流（非硬编码）
+            llm: LLM 实例（use_llm_allocation=True 时需要）
             on_progress: 进度回调 (stage, info_dict)
 
         Returns:
@@ -235,8 +333,30 @@ class Orchestrator:
 
         # 自动模式检测
         mode_reason = ""
+        llm_workflow = None
         if mode == ExecutionMode.AUTO:
-            mode, mode_reason = ModeDetector.detect(description)
+            if use_llm_allocation and llm is not None:
+                # LLM 驱动的工作流分配
+                all_agents = self.tm.list_agents_dict()
+                agents_info = [
+                    {"name": p.name, "skills": p.skills, "description": p.description}
+                    for p in all_agents.values()
+                ]
+                llm_workflow = LLMWorkflowAllocator.allocate(description, agents_info, llm)
+                mode = ExecutionMode(llm_workflow.get("mode", "single"))
+                mode_reason = llm_workflow.get("reason", "")
+                task.metadata["llm_workflow"] = llm_workflow
+                # 如果 LLM 指定了 Agent，优先使用
+                if llm_workflow.get("agents") and not agent_names:
+                    agent_names = llm_workflow["agents"]
+                self._emit_progress(on_progress, "workflow_alloc", {
+                    "mode": mode.value,
+                    "reason": mode_reason,
+                    "workflow": llm_workflow.get("workflow", []),
+                    "agents": agent_names or [],
+                })
+            else:
+                mode, mode_reason = ModeDetector.detect(description)
 
         result = OrchestrationResult(
             task_id=task.id,
@@ -359,13 +479,22 @@ class Orchestrator:
     # ======== 辅助：注入 event_logger 到 Agent ────
 
     @staticmethod
-    def _run_agent_with_logging(agent_proxy: AgentProxy, task: Task, prompt: str) -> str:
-        """运行 Agent 并自动捕获事件到 task.event_log"""
+    def _run_agent_with_logging(agent_proxy: AgentProxy, task: Task, prompt: str,
+                                 on_progress: Callable | None = None) -> str:
+        """运行 Agent 并自动捕获事件到 task.event_log，发送 agent_think 标记"""
         original_on_event = getattr(agent_proxy.agent, 'on_event', None)
 
         def event_logger(event, data):
             evt_name = event.value if hasattr(event, 'value') else str(event)
             task.add_event(evt_name, str(data)[:300])
+            # 发送带 Agent 名称标记的进度事件
+            if on_progress:
+                try:
+                    data_dict = data if isinstance(data, dict) else {"data": str(data)[:200]}
+                    data_dict["agent_name"] = agent_proxy.name
+                    on_progress(f"agent_{evt_name}", data_dict)
+                except Exception:
+                    pass
             if original_on_event:
                 try:
                     original_on_event(event, data)
@@ -373,9 +502,18 @@ class Orchestrator:
                     logger.warning(f"编排事件回调失败: {e}")
 
         try:
+            # 发送 agent_think 开始事件
+            if on_progress:
+                on_progress("agent_think_start", {"agent": agent_proxy.name})
+            
             agent_proxy.agent.on_event = event_logger
             output = agent_proxy.agent.run(prompt)
             agent_proxy.agent.on_event = original_on_event
+            
+            # 发送 agent_think 结束事件
+            if on_progress:
+                on_progress("agent_think_end", {"agent": agent_proxy.name})
+            
             return output or ""
         except Exception:
             logger.warning(f"Agent.run 执行异常，恢复 on_event: {agent_proxy.name}", exc_info=True)

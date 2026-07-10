@@ -66,6 +66,10 @@ class AgentEvent(Enum):
     ERROR = "error"
     PLAN_CREATED = "plan_created"
     LLM_TOKEN = "llm_token"
+    INTERRUPT_REQUEST = "interrupt_request"   # Agent 请求中断（询问用户）
+    INTERRUPT_RESUME = "interrupt_resume"     # Agent 从中断恢复
+    AGENT_THINK = "agent_think"              # 带 Agent 名称的思考标记
+    WORKFLOW_ALLOC = "workflow_alloc"         # LLM 驱动的工作流分配结果
 
 
 # ============================================================
@@ -222,18 +226,57 @@ class Agent:
     # --- 事件回调 ---
     on_event: Optional[Callable[[AgentEvent, Any], None]] = None
 
+    # --- 中断支持 ---
+    _pending_interrupt: bool = field(default=False, repr=False)
+    _interrupt_answer: str | None = field(default=None, repr=False)
+
     # --- 指标收集 ---
     metrics: Any = field(default_factory=lambda: None)  # MetricsCollector, 懒初始化
 
     # ======== 事件发射 ========
 
     def _emit(self, event: AgentEvent, data: Any = None):
-        """发射事件给回调"""
+        """发射事件给回调，自动附加 Agent 名称"""
         if self.on_event:
             try:
+                if isinstance(data, dict):
+                    data.setdefault("agent_name", self.name)
+                else:
+                    data = {"data": data, "agent_name": self.name}
                 self.on_event(event, data)
             except Exception:
                 pass
+
+    def request_interrupt(self, question: str) -> str | None:
+        """
+        请求中断：向用户提问并等待回复
+        
+        Args:
+            question: 向用户提出的问题
+            
+        Returns:
+            用户的回复字符串，如果超时则返回 None
+        """
+        self._emit(AgentEvent.INTERRUPT_REQUEST, {
+            "question": question,
+            "agent_name": self.name,
+        })
+        # 中断回复由外部通过 resume_from_interrupt() 注入
+        self._pending_interrupt = True
+        return None  # 实际值由外部设置
+
+    def resume_from_interrupt(self, answer: str):
+        """从中断恢复，注入用户回答"""
+        self._pending_interrupt = False
+        self._interrupt_answer = answer
+        self._emit(AgentEvent.INTERRUPT_RESUME, {
+            "answer": answer,
+            "agent_name": self.name,
+        })
+
+    # 中断状态
+    _pending_interrupt: bool = False
+    _interrupt_answer: str | None = None
 
     def _log(self, msg: str):
         """日志输出"""
@@ -907,11 +950,27 @@ class Agent:
             ):
                 kind = event.get("event", "")
 
-                if kind == "on_chat_model_stream":
+                if kind == "on_chat_model_start":
+                    # Agent 开始思考 — 发送 agent_think 事件
+                    yield {
+                        "type": "agent_think",
+                        "agent_name": self.name,
+                        "status": "started",
+                    }
+
+                elif kind == "on_chat_model_stream":
                     chunk_data = event.get("data", {}).get("chunk", {})
                     if hasattr(chunk_data, "content") and chunk_data.content:
                         full_text += chunk_data.content
-                        yield {"type": "text", "content": chunk_data.content}
+                        yield {"type": "text", "content": chunk_data.content, "agent_name": self.name}
+
+                elif kind == "on_chat_model_end":
+                    # Agent 思考结束
+                    yield {
+                        "type": "agent_think",
+                        "agent_name": self.name,
+                        "status": "ended",
+                    }
 
                 elif kind == "on_tool_start":
                     tool_name = event.get("name", "unknown")
@@ -922,6 +981,7 @@ class Agent:
                         "call_id": run_id,
                         "name": tool_name,
                         "arguments": tool_input,
+                        "agent_name": self.name,
                     }
                     self._emit(AgentEvent.TOOL_CALL, {"name": tool_name})
 
@@ -937,6 +997,7 @@ class Agent:
                         "name": tool_name,
                         "success": True,
                         "result": output_str,
+                        "agent_name": self.name,
                     }
                     self._emit(AgentEvent.TOOL_RESULT, {
                         "tool": tool_name,
@@ -947,12 +1008,12 @@ class Agent:
             if full_text:
                 self.memory.short.add(Message.assistant(full_text))
 
-            yield {"type": "done"}
+            yield {"type": "done", "agent_name": self.name}
 
         except Exception as e:
             self._emit(AgentEvent.ERROR, {"error": str(e)})
-            yield {"type": "error", "content": str(e)}
-            yield {"type": "done"}
+            yield {"type": "error", "content": str(e), "agent_name": self.name}
+            yield {"type": "done", "agent_name": self.name}
 
         self.state = AgentState.FINISHED
 

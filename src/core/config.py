@@ -233,6 +233,15 @@ class AppConfig:
     # ======== 预定义技能标签 ========
     predefined_skills: list[dict] = field(default_factory=list)
 
+    # ======== 五板块提示词模板 ========
+    prompt_template: dict = field(default_factory=lambda: {
+        "role_definition": "你是 {agent_name}，一个专业的 AI 助手。",
+        "core_objectives": "1. 准确理解用户意图，高效完成任务",
+        "behavior_rules": "- 复杂任务先分解再逐步执行\n- 搜索优先于猜测",
+        "resource_calls": "- 可调用工具：网络搜索、文件读写、代码执行",
+        "error_handling": "- 工具调用失败时重试，仍失败则告知用户",
+    })
+
     # ======== 可用模型列表 ========
     available_models: list[dict] = field(default_factory=lambda: [
         {"id": "deepseek-chat", "name": "DeepSeek Chat", "provider": "deepseek"},
@@ -423,6 +432,11 @@ def _parse_config(raw: dict) -> AppConfig:
     predefined_skills_raw = raw.get("predefined_skills", [])
     if predefined_skills_raw:
         cfg.predefined_skills = list(predefined_skills_raw)
+
+    # 五板块提示词模板
+    prompt_template_raw = raw.get("prompt_template", {})
+    if prompt_template_raw:
+        cfg.prompt_template = dict(prompt_template_raw)
 
     return cfg
 
