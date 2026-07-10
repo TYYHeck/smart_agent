@@ -3529,21 +3529,33 @@ async def api_delete_file(file: str, current_user = Depends(get_current_user)):
 @app.post("/api/files/batch-delete")
 async def api_batch_delete_files(req: dict, current_user = Depends(get_current_user)):
     """批量删除输出文件"""
+    import logging
+    _log = logging.getLogger("smart_agent.web")
     files = req.get("files", [])
     if not files:
         raise HTTPException(status_code=400, detail="未指定文件")
+    output_dir = _get_output_dir()
+    _log.info(f"批量删除: output_dir={output_dir}, 文件数={len(files)}")
     deleted = 0
     errors = []
     for f in files:
         real_path = _safe_file_path(f)
-        if not real_path or not _os.path.isfile(real_path):
+        if not real_path:
+            _log.warning(f"批量删除-路径非法: input={f}")
+            errors.append(f"{f}: 路径非法")
+            continue
+        if not _os.path.isfile(real_path):
+            _log.warning(f"批量删除-文件不存在: input={f}, real={real_path}")
             errors.append(f"{f}: 不存在")
             continue
         try:
             _os.remove(real_path)
+            _log.info(f"批量删除-已删除: {f} -> {real_path}")
             deleted += 1
         except OSError as e:
+            _log.error(f"批量删除-删除失败: {f}: {e}")
             errors.append(f"{f}: {e}")
+    _log.info(f"批量删除结果: deleted={deleted}, errors={errors}")
     return {"ok": True, "deleted": deleted, "errors": errors}
 
 
