@@ -531,7 +531,7 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
   </div>
 
   <!-- ===== 对话 — 统一大聊天框 ===== -->
-  <div id="tab-chat" class="tab-content active" style="display:flex;">
+  <div id="tab-chat" class="tab-content">
     <div class="unified-chat">
       <div class="unified-messages" id="unifiedChat"></div>
       <!-- 中断提问栏 -->
@@ -576,6 +576,12 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
         <button onclick="filterTasks('pending', this)" class="btn btn-outline btn-sm task-filter">待处理</button>
         <button onclick="filterTasks('running', this)" class="btn btn-outline btn-sm task-filter">执行中</button>
         <button onclick="filterTasks('completed', this)" class="btn btn-outline btn-sm task-filter">已完成</button>
+        <span style="margin-left:12px;display:none;" id="taskBatchBar">
+          <button class="btn btn-sm btn-outline" onclick="selectAllTasks()">全选</button>
+          <button class="btn btn-sm btn-outline" onclick="deselectAllTasks()">取消全选</button>
+          <button class="btn btn-sm btn-danger" onclick="batchDeleteTasks()">🗑 批量删除</button>
+          <span style="color:var(--muted);font-size:12px;" id="taskSelectedCount"></span>
+        </span>
       </div>
       <div id="taskList"></div>
     </div>
@@ -639,7 +645,15 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
     <div class="task-panel">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h2 style="margin:0;">📁 输出文件</h2>
-        <button class="btn btn-outline btn-sm" onclick="loadOutputFiles()">🔄 刷新</button>
+        <div>
+          <span style="display:none;margin-right:8px;" id="fileBatchBar">
+            <button class="btn btn-sm btn-outline" onclick="selectAllFiles()">全选</button>
+            <button class="btn btn-sm btn-outline" onclick="deselectAllFiles()">取消全选</button>
+            <button class="btn btn-sm btn-danger" onclick="batchDeleteFiles()">🗑 批量删除</button>
+            <span style="color:var(--muted);font-size:12px;" id="fileSelectedCount"></span>
+          </span>
+          <button class="btn btn-outline btn-sm" onclick="loadOutputFiles()">🔄 刷新</button>
+        </div>
       </div>
       <p style="color:var(--muted);margin-bottom:12px;font-size:12px;">
         Agent 执行任务时生成的文件列表。点击下载或预览。
@@ -749,6 +763,50 @@ async function deleteOutputFile(filepath) {
   } catch(e) { alert('删除出错: '+e.message); }
 }
 
+// ==================== 批量删除文件 ====================
+function onFileCheckChange() {
+  const checked = document.querySelectorAll('.file-checkbox:checked');
+  const bar = $('fileBatchBar');
+  const count = $('fileSelectedCount');
+  if (checked.length > 0) {
+    bar.style.display = 'inline';
+    count.textContent = '已选 ' + checked.length + ' 项';
+  } else {
+    bar.style.display = 'none';
+  }
+  // 更新全选框状态
+  const all = document.querySelectorAll('.file-checkbox');
+  const checkAll = $('fileCheckAll');
+  if (checkAll) checkAll.checked = all.length > 0 && checked.length === all.length;
+}
+function toggleAllFiles(el) {
+  document.querySelectorAll('.file-checkbox').forEach(cb => { cb.checked = el.checked; });
+  onFileCheckChange();
+}
+function selectAllFiles() {
+  document.querySelectorAll('.file-checkbox').forEach(cb => { cb.checked = true; });
+  onFileCheckChange();
+}
+function deselectAllFiles() {
+  document.querySelectorAll('.file-checkbox').forEach(cb => { cb.checked = false; });
+  onFileCheckChange();
+}
+async function batchDeleteFiles() {
+  const checked = document.querySelectorAll('.file-checkbox:checked');
+  if (checked.length === 0) return;
+  const paths = Array.from(checked).map(cb => cb.dataset.filePath);
+  if (!confirm('确认永久删除 ' + paths.length + ' 个文件？此操作不可恢复。')) return;
+  try {
+    const resp = await fetch('/api/files/batch-delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+      body: JSON.stringify({ files: paths })
+    });
+    const data = await resp.json();
+    if (data.ok) { loadOutputFiles(); alert('成功删除 ' + data.deleted + ' 个文件'); }
+    else { alert('批量删除失败: ' + (data.detail || '未知错误')); }
+  } catch(e) { alert('删除出错: ' + e.message); }
+}
+
 function getCodeLang(filepath) {
   const ext = (filepath||'').toLowerCase().split('.').pop();
   const map = {py:'language-python',js:'language-javascript',ts:'language-typescript',
@@ -787,8 +845,7 @@ function uploadChatFile(input) {
   if (!input.files || input.files.length === 0) return;
   uploadFiles(input.files, (data) => {
     chatUploadedFiles.push(data.path);
-    addBubble('user', '📎 已上传: ' + data.filename + ' (' + formatSize(data.size) + ')');
-    scrollBottom();
+    const um = addUnifiedMsg('user'); um.querySelector('.msg-body').textContent = '📎 已上传: ' + data.filename + ' (' + formatSize(data.size) + ')';
   });
   input.value = '';
 }
@@ -998,6 +1055,8 @@ let unifiedAbortController = null;
 let currentUnifiedMsg = null;
 let unifiedFullText = '';
 let currentTaskId = null;
+let currentInputText = '';
+
 
 async function toggleMode(mode) {
   try {
@@ -1124,6 +1183,8 @@ async function sendUnified() {
   $('unifiedInput').value = '';
   $('unifiedInput').style.height = 'auto';
   unifiedStreaming = true;
+  currentTaskId = 'chat_' + Date.now();
+  currentInputText = text;
   $('unifiedSendBtn').disabled = true;
   $('unifiedPauseBtn').classList.add('show');
   $('unifiedCancelBtn').classList.add('show');
@@ -1281,7 +1342,7 @@ function handleOrchUnifiedEvent(data) {
 function pauseExecution() {
   if (unifiedAbortController) {
     $('interruptBar').classList.add('show');
-    $('interruptQuestion').textContent = 'Agent 正在执行中，你想暂停询问什么？';
+    $('interruptQuestion').textContent = '补充指令（将中止当前执行后继续对话）：';
     $('interruptInput').focus();
   }
 }
@@ -1290,12 +1351,23 @@ function submitInterrupt() {
   const answer = $('interruptInput').value.trim();
   $('interruptInput').value = '';
   $('interruptBar').classList.remove('show');
-  if (answer && currentTaskId) {
-    api('/api/chat/interrupt-reply', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
-      body: JSON.stringify({ task_id: currentTaskId, answer: answer })
-    });
+  if (!answer) return;
+  // 中止当前流
+  if (unifiedAbortController) {
+    unifiedAbortController.abort();
+    unifiedAbortController = null;
   }
+  // 在消息中标注中断
+  if (currentUnifiedMsg) {
+    currentUnifiedMsg.querySelector('.msg-body').innerHTML += '<div style="color:var(--warning);margin-top:4px;">⏸ 已暂停，接收补充指令...</div>';
+  }
+  unifiedStreaming = false;
+  $('unifiedSendBtn').disabled = false;
+  $('unifiedPauseBtn').classList.remove('show');
+  $('unifiedCancelBtn').classList.remove('show');
+  // 把补充指令作为新消息发送，让 Agent 基于完整上下文继续
+  $('unifiedInput').value = answer;
+  sendUnified();
 }
 
 function skipInterrupt() {
@@ -1489,6 +1561,7 @@ async function refreshTasks(status) {
 
       return `
       <div class="task-card">
+        <input type="checkbox" class="task-checkbox" data-task-id="${t.id}" onclick="event.stopPropagation();onTaskCheckChange()" style="margin-right:8px;accent-color:var(--purple);width:16px;height:16px;flex-shrink:0;">
         <div class="task-info" style="cursor:pointer;" onclick="showTaskDetailModal('${t.id}')">
           <div class="task-title">${escHtml(t.title||t.description||'').slice(0,60)}${orchBadge}</div>
           <div class="task-meta">ID: ${t.id} | ${(t.created_at||'').slice(0,16)} | Agent: ${t.assigned_agent||'-'}${isOrch ? ' | 多Agent协作' : ''}</div>
@@ -1548,6 +1621,42 @@ async function deleteTask(taskId) {
     if(data.ok) { refreshTasks(''); loadDashboard(); }
     else { alert('删除失败: '+(data.error||'未知错误')); }
   } catch(e) { alert('删除出错: '+e.message); }
+}
+
+// ==================== 批量删除任务 ====================
+function onTaskCheckChange() {
+  const checked = document.querySelectorAll('.task-checkbox:checked');
+  const bar = $('taskBatchBar');
+  const count = $('taskSelectedCount');
+  if (checked.length > 0) {
+    bar.style.display = 'inline';
+    count.textContent = '已选 ' + checked.length + ' 项';
+  } else {
+    bar.style.display = 'none';
+  }
+}
+function selectAllTasks() {
+  document.querySelectorAll('.task-checkbox').forEach(cb => { cb.checked = true; });
+  onTaskCheckChange();
+}
+function deselectAllTasks() {
+  document.querySelectorAll('.task-checkbox').forEach(cb => { cb.checked = false; });
+  onTaskCheckChange();
+}
+async function batchDeleteTasks() {
+  const checked = document.querySelectorAll('.task-checkbox:checked');
+  if (checked.length === 0) return;
+  const ids = Array.from(checked).map(cb => cb.dataset.taskId);
+  if (!confirm('确认永久删除 ' + ids.length + ' 个任务？此操作不可恢复。')) return;
+  try {
+    const resp = await fetch('/api/tasks/batch-delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+      body: JSON.stringify({ task_ids: ids })
+    });
+    const data = await resp.json();
+    if (data.ok) { refreshTasks(''); loadDashboard(); }
+    else { alert('批量删除失败: ' + (data.error || '未知错误')); }
+  } catch(e) { alert('删除出错: ' + e.message); }
 }
 
 // ==================== 多 Agent 编排执行 ====================
@@ -2061,7 +2170,8 @@ function showEditAgentModal(name) {
     const maxIter = cfg.max_iterations || 15;
 
     openModal('编辑 Agent: '+name,
-      `<div class="form-group"><label>技能 (逗号分隔)</label><input class="form-input" id="eaSkills" value="${escHtml((a.skills||[]).join(','))}"></div>
+      `<div class="form-group"><label>名称</label><input class="form-input" id="eaName" value="${escHtml(name)}"></div>
+       <div class="form-group"><label>技能 (逗号分隔)</label><input class="form-input" id="eaSkills" value="${escHtml((a.skills||[]).join(','))}"></div>
        <div class="form-group"><label>描述</label><input class="form-input" id="eaDesc" value="${escHtml(a.description||'')}"></div>
        <div class="form-group">
          <label>System Prompt <span style="color:var(--muted);font-weight:normal">（最长5000字符）</span></label>
@@ -2081,16 +2191,22 @@ function showEditAgentModal(name) {
          </label>
        </div>`,
       async () => {
+        const newName = $('eaName').value.trim();
+        if (!newName) { alert('名称不能为空'); return; }
         const skills = $('eaSkills').value.split(',').map(s=>s.trim()).filter(Boolean);
-        await api('/api/agents/'+encodeURIComponent(name)+'/update',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({
-            skills, description:$('eaDesc').value,
-            system_prompt:$('eaPrompt').value,
-            max_iterations:parseInt($('eaMaxIter').value)||15,
-            enable_planning:$('eaPlanning').checked,
-            enable_rag:$('eaRag').checked,
-            enable_reflection:$('eaReflection').checked,
-          })});
+        const payload = {
+          name: newName,
+          skills, description: $('eaDesc').value,
+          system_prompt: $('eaPrompt').value,
+          max_iterations: parseInt($('eaMaxIter').value) || 15,
+          enable_planning: $('eaPlanning').checked,
+          enable_rag: $('eaRag').checked,
+          enable_reflection: $('eaReflection').checked,
+        };
+        await api('/api/agents/' + encodeURIComponent(name) + '/update', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
         loadAgents(); refreshAgentCombo();
       }, '保存'
     );
@@ -2219,11 +2335,12 @@ async function loadOutputFiles() {
       $('outputFilesList').innerHTML = '<div style="color:var(--muted);padding:24px 0;text-align:center;">暂无输出文件。<br>发布任务让 Agent 生成文件后会自动显示在这里。</div>';
       return;
     }
-    let html = '<table class="data-table"><tr><th>文件名</th><th>路径</th><th>大小</th><th>操作</th></tr>';
+    let html = '<table class="data-table"><tr><th><input type="checkbox" id="fileCheckAll" onclick="toggleAllFiles(this)" style="accent-color:var(--purple);"></th><th>文件名</th><th>路径</th><th>大小</th><th>操作</th></tr>';
     files.forEach(f => {
       const ext = (f.name.split('.').pop()||'').toLowerCase();
       const icon = {'py':'🐍','js':'🟨','html':'🌐','css':'🎨','json':'📋','md':'📝','txt':'📄','csv':'📊','yaml':'⚙️','yml':'⚙️','png':'🖼️','jpg':'🖼️'}[ext] || '📎';
       html += `<tr>
+        <td><input type="checkbox" class="file-checkbox" data-file-path="${escAttr(f.path)}" onclick="onFileCheckChange()" style="accent-color:var(--purple);"></td>
         <td><span style="margin-right:4px;">${icon}</span>${escHtml(f.name)}</td>
         <td style="font-size:11px;color:var(--muted);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(f.path)}">${escHtml(f.path)}</td>
         <td>${escHtml(f.size_str)}</td>
@@ -2236,6 +2353,7 @@ async function loadOutputFiles() {
     });
     html += '</table>';
     $('outputFilesList').innerHTML = html;
+    $('fileBatchBar').style.display = 'none';
   } catch(e) { console.error(e); }
 }
 
@@ -2535,6 +2653,12 @@ function logout() {
 }
 $('loginPass').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 
+// ==================== 斜杠命令 ====================
+let commandsCache = [];
+async function loadCommands() {
+  try { const d = await api('/api/commands'); commandsCache = d.commands||[]; } catch(e) { commandsCache=[]; }
+}
+
 // ==================== 初始化 ====================
 function initApp() {
   if(!getToken()) { showLogin(); return; }
@@ -2549,7 +2673,7 @@ function initApp() {
     $('toggleReflect').checked = c.reflection;
     $('stat-tools').textContent = c.tools;
     $('stat-lc').textContent = c.langchain?'启用':'兼容模式';
-    addBubble('agent','你好！我是 SmartAgent。左侧「仪表盘」查看数据概览，「对话」进行交互，「任务管理」发布任务，「Agent管理」管理智能体，「配置」编辑系统参数。');
+    const wm = addUnifiedMsg('agent', 'SmartAgent'); wm.querySelector('.msg-body').textContent = '你好！我是 SmartAgent。左侧「仪表盘」查看数据概览，「对话」进行交互，「任务管理」发布任务，「Agent管理」管理智能体，「配置」编辑系统参数。';
   }).catch(e => { console.error(e); if(e.message.includes('401')) logout(); });
 }
 
@@ -3403,6 +3527,49 @@ async def api_delete_file(file: str, current_user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
 
 
+@app.post("/api/files/batch-delete")
+async def api_batch_delete_files(req: dict, current_user = Depends(get_current_user)):
+    """批量删除输出文件"""
+    files = req.get("files", [])
+    if not files:
+        raise HTTPException(status_code=400, detail="未指定文件")
+    deleted = 0
+    errors = []
+    for f in files:
+        real_path = _safe_file_path(f)
+        if not real_path or not _os.path.isfile(real_path):
+            errors.append(f"{f}: 不存在")
+            continue
+        try:
+            _os.remove(real_path)
+            deleted += 1
+        except OSError as e:
+            errors.append(f"{f}: {e}")
+    return {"ok": True, "deleted": deleted, "errors": errors}
+
+
+@app.post("/api/tasks/batch-delete")
+async def api_batch_delete_tasks(req: dict, current_user = Depends(get_current_user)):
+    """批量删除任务"""
+    task_ids = req.get("task_ids", [])
+    if not task_ids:
+        raise HTTPException(status_code=400, detail="未指定任务")
+    tm = get_task_manager()
+    deleted = 0
+    errors = []
+    for tid in task_ids:
+        task = tm.get_task(tid)
+        if task is None:
+            errors.append(f"{tid}: 不存在")
+            continue
+        try:
+            tm.delete_task(tid)
+            deleted += 1
+        except Exception as e:
+            errors.append(f"{tid}: {e}")
+    return {"ok": True, "deleted": deleted, "errors": errors}
+
+
 @app.get("/api/tasks/list")
 async def api_list_tasks(status: str = "", limit: int = 20, current_user = Depends(get_current_user)):
     tm = get_task_manager()
@@ -3818,8 +3985,14 @@ async def api_update_task(task_id: str, req: UpdateTaskRequest, current_user = D
 # ============================================================
 
 class UpdateAgentRequest(BaseModel):
+    name: str | None = Field(None, description="更新名称（可选）")
     skills: list[str] | None = Field(None, description="更新技能标签列表（可选）")
     description: str | None = Field(None, description="更新描述（可选）")
+    system_prompt: str | None = Field(None, description="更新系统提示词（可选）")
+    max_iterations: int | None = Field(None, description="更新最大迭代次数（可选）")
+    enable_planning: bool | None = Field(None, description="更新计划模式（可选）")
+    enable_rag: bool | None = Field(None, description="更新 RAG 开关（可选）")
+    enable_reflection: bool | None = Field(None, description="更新反思模式（可选）")
 
 
 @app.post("/api/agents/{name}/update")
@@ -3829,10 +4002,45 @@ async def api_update_agent(name: str, req: UpdateAgentRequest, current_user = De
     if proxy is None:
         return JSONResponse({"ok": False, "error": "Agent 未找到"}, status_code=404)
 
+    # 改名：从旧 key 迁移到新 key
+    new_name = (req.name or '').strip() or name
+    if new_name != name:
+        if new_name in tm._agents:
+            return JSONResponse({"ok": False, "error": f"Agent '{new_name}' 已存在"}, status_code=409)
+        tm._agents[new_name] = tm._agents.pop(name)
+        proxy = tm._agents[new_name]
+        proxy.name = new_name
+        proxy.agent.name = new_name  # 同步 Agent 实例的 name
+
+    agent = proxy.agent
     if req.skills is not None:
         proxy.skills = req.skills
     if req.description is not None:
         proxy.description = req.description
+    if req.system_prompt is not None:
+        agent.system_prompt = req.system_prompt
+    if req.max_iterations is not None:
+        agent.max_iterations = req.max_iterations
+    if req.enable_planning is not None:
+        agent.enable_planning = req.enable_planning
+    if req.enable_rag is not None:
+        agent.enable_rag = req.enable_rag
+    if req.enable_reflection is not None:
+        agent.enable_reflection = req.enable_reflection
+
+    # 同步到数据库
+    await _persist_agent_to_db(
+        name=proxy.name,
+        model=getattr(agent, 'model', '') or '',
+        provider=getattr(agent, 'provider', '') or '',
+        skills=proxy.skills or [],
+        description=proxy.description or '',
+        system_prompt=getattr(agent, 'system_prompt', '') or '',
+        max_iterations=getattr(agent, 'max_iterations', 15) or 15,
+        enable_planning=getattr(agent, 'enable_planning', False) or False,
+        enable_rag=getattr(agent, 'enable_rag', True) if getattr(agent, 'enable_rag', True) is not None else True,
+        enable_reflection=getattr(agent, 'enable_reflection', False) or False,
+    )
 
     return {"ok": True, "agent": proxy.to_dict()}
 
