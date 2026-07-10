@@ -96,6 +96,42 @@ agent:
     - API 超时或网络异常时，等待 3 秒后重试一次，若仍失败则回退使用已有知识回答并注明局限性
     - 遇到无法处理的任务时，明确告知用户能力边界，不强行执行或编造结果
 
+  # 技能标签（用于智能任务路由匹配，Agent 创建时可选）
+  skills: ["通用"]
+
+# --- 预定义技能标签 (创建Agent时可选) ---
+predefined_skills:
+  - id: "coding"
+    label: "编程开发"
+    desc: "编写代码、调试 Bug、代码重构、算法实现"
+  - id: "research"
+    label: "调研分析"
+    desc: "市场调研、技术研究、文献分析、竞品对比"
+  - id: "writing"
+    label: "文档写作"
+    desc: "文章撰写、文案润色、翻译校对、简历优化"
+  - id: "data"
+    label: "数据处理"
+    desc: "数据清洗、统计分析、报表制作、数据可视化"
+  - id: "file_ops"
+    label: "文件操作"
+    desc: "文件读写、格式转换、压缩解压、批量处理"
+  - id: "shell"
+    label: "运维脚本"
+    desc: "Shell/Python脚本、自动化部署、系统管理"
+  - id: "resume"
+    label: "简历优化"
+    desc: "简历润色、排版美化、面试建议、求职指导"
+  - id: "troubleshooting"
+    label: "故障排查"
+    desc: "Bug定位、日志分析、性能诊断、问题溯源"
+  - id: "architecture"
+    label: "架构设计"
+    desc: "系统架构、技术选型、方案设计、代码评审"
+  - id: "general"
+    label: "通用助手"
+    desc: "通用对话、问答咨询、日常辅助"
+
 # --- Tracing 可观测性 ---
 tracing:
   enabled: false               # 设为 true 并设置 LANGCHAIN_API_KEY 启用

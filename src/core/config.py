@@ -88,6 +88,7 @@ class AgentConfig:
     name: str = "SmartAgent"
     max_iterations: int = 15
     verbose: bool = True
+    skills: list[str] = field(default_factory=lambda: ["通用"])
     system_prompt: str = (
         "【角色定义】\n"
         "你是 SmartAgent，一个基于 ReAct 架构构建的智能 AI 助手。你不是 DeepSeek、OpenAI 或其他厂商的官方助手——你只有一个身份：SmartAgent。\n"
@@ -229,6 +230,9 @@ class AppConfig:
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
 
+    # ======== 预定义技能标签 ========
+    predefined_skills: list[dict] = field(default_factory=list)
+
     # ======== 可用模型列表 ========
     available_models: list[dict] = field(default_factory=lambda: [
         {"id": "deepseek-chat", "name": "DeepSeek Chat", "provider": "deepseek"},
@@ -322,6 +326,7 @@ def _parse_config(raw: dict) -> AppConfig:
             name=agent_raw.get("name", cfg.agent.name),
             max_iterations=agent_raw.get("max_iterations", cfg.agent.max_iterations),
             verbose=agent_raw.get("verbose", cfg.agent.verbose),
+            skills=list(agent_raw.get("skills", cfg.agent.skills)),
             system_prompt=agent_raw.get("system_prompt", cfg.agent.system_prompt),
         )
 
@@ -413,6 +418,11 @@ def _parse_config(raw: dict) -> AppConfig:
                 pipeline_score_min=auto_raw.get("pipeline_score_min", cfg.orchestrator.auto_detect.pipeline_score_min),
             ),
         )
+
+    # 预定义技能标签
+    predefined_skills_raw = raw.get("predefined_skills", [])
+    if predefined_skills_raw:
+        cfg.predefined_skills = list(predefined_skills_raw)
 
     return cfg
 
