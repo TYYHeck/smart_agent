@@ -120,16 +120,47 @@ def _resolve_path(filepath: str) -> str:
     return os.path.join(base, filepath)
 
 
-@tool(description="读取文件内容，支持文本文件。返回文件全文。")
+@tool(description="读取文件内容，支持文本文件(.txt .md .py .json .csv .html等)和Word文档(.docx)。返回文件全文。")
 def read_file(filepath: str) -> str:
-    """读取本地文件"""
+    """读取本地文件，支持文本文件和 .docx"""
     try:
-        # 安全检查：限制读取范围
         abs_path = os.path.abspath(_resolve_path(filepath))
-        with open(abs_path, encoding="utf-8") as f:
-            content = f.read()
-        if len(content) > 10000:
-            content = content[:10000] + "\n\n... (文件过长，已截断)"
+
+        # 检查文件是否存在
+        if not os.path.exists(abs_path):
+            return f"读取失败: 文件不存在: {abs_path}"
+
+        # .docx 文件用 python-docx 解析
+        if abs_path.lower().endswith('.docx'):
+            try:
+                from docx import Document
+                doc = Document(abs_path)
+                paragraphs = []
+                for para in doc.paragraphs:
+                    if para.text.strip():
+                        paragraphs.append(para.text.strip())
+                # 也读表格内容
+                for table in doc.tables:
+                    for row in table.rows:
+                        cells = [cell.text.strip() for cell in row.cells]
+                        paragraphs.append(" | ".join(cells))
+                content = "\n".join(paragraphs)
+            except ImportError:
+                return "读取失败: 需要安装 python-docx 库。请执行 pip install python-docx"
+            except Exception as e:
+                return f"读取失败: 无法解析 .docx 文件 - {str(e)}"
+        else:
+            # 普通文本文件
+            try:
+                with open(abs_path, encoding="utf-8") as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                # 非 UTF-8 编码尝试用 latin-1
+                with open(abs_path, encoding="latin-1") as f:
+                    content = f.read()
+
+        if len(content) > 15000:
+            content = content[:15000] + "\n\n... (文件过长，已截断)"
         return content
     except Exception as e:
         return f"读取失败: {str(e)}"
