@@ -54,6 +54,7 @@ CHAT_PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2358a6ff'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-family='Arial,sans-serif' font-size='28' font-weight='bold' fill='white'%3ESA%3C/text%3E%3C/svg%3E">
 <title>SmartAgent - 智能AI助手</title>
 <style>
 :root {
@@ -342,8 +343,56 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 ::-webkit-scrollbar { width:6px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
-/* 响应式 */
-@media(max-width:768px) { .sidebar { width:200px; } .dash-grid { grid-template-columns:1fr; } .stat-cards { grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); } }
+/* 汉堡菜单 (移动端) */
+.hamburger { display:none; position:fixed; top:12px; left:12px; z-index:1100; width:44px; height:44px; background:var(--card); border:1px solid var(--border); border-radius:10px; color:var(--text-bright); font-size:22px; cursor:pointer; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4); }
+.sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:998; }
+/* 响应式 - 移动端适配 */
+@media(max-width:768px) {
+  .hamburger { display:flex; }
+  .sidebar { position:fixed; top:0; left:0; bottom:0; z-index:999; width:270px; transform:translateX(-100%); transition:transform .3s cubic-bezier(.4,0,.2,1); box-shadow:4px 0 20px rgba(0,0,0,.5); }
+  .sidebar.open { transform:translateX(0); }
+  .sidebar-overlay.show { display:block; }
+  body { flex-direction:column; }
+  .main { width:100%; min-width:0; }
+  .tab-bar { overflow-x:auto; -webkit-overflow-scrolling:touch; flex-wrap:nowrap; padding:0 4px; gap:2px; scrollbar-width:none; }
+  .tab-bar::-webkit-scrollbar { display:none; }
+  .tab-btn { padding:10px 12px; font-size:12px; white-space:nowrap; flex-shrink:0; }
+  .tab-btn .tab-icon { margin-right:2px; }
+  .chat-area { padding:12px 8px; gap:10px; }
+  .message { max-width:96%; font-size:13px; }
+  .bubble { padding:10px 12px; font-size:13px; }
+  .avatar { width:30px; height:30px; font-size:14px; }
+  .input-area { padding:10px 12px; gap:6px; flex-wrap:wrap; }
+  .input-area textarea { font-size:16px; min-height:40px; padding:10px 12px; }
+  .input-area button { padding:10px 16px; font-size:13px; min-height:44px; }
+  .dashboard { padding:12px; gap:12px; }
+  .dash-grid { grid-template-columns:1fr; gap:12px; }
+  .stat-cards { grid-template-columns:repeat(2,1fr); gap:8px; }
+  .stat-card { padding:12px 10px; }
+  .stat-card .stat-val { font-size:22px; }
+  .task-panel { padding:12px; }
+  .task-panel h2 { font-size:16px; }
+  .task-card { flex-direction:column; gap:8px; align-items:stretch; }
+  .task-card .table-actions { justify-content:flex-end; }
+  .modal { min-width:auto; max-width:95vw; margin:0 8px; padding:18px 16px; }
+  .modal.wide { max-width:95vw; }
+  .publish-form { flex-direction:column; }
+  .publish-form input { min-width:auto; }
+  .form-row { flex-direction:column; gap:8px; }
+  .form-input,.form-textarea,.form-select { font-size:16px; }
+  .btn { min-height:36px; }
+  .btn-sm { min-height:30px; }
+  .data-table { font-size:11px; }
+  .data-table th,.data-table td { padding:6px 8px; }
+  .combo-input { font-size:16px; }
+  .login-card { padding:24px 20px; max-width:95vw; }
+  .login-card h1 { font-size:20px; }
+  .mode-toggle { flex-wrap:wrap; }
+  .mode-btn { font-size:11px; padding:6px 10px; }
+  .orch-mode-badge { font-size:11px; padding:3px 10px; }
+  .detail-section { font-size:12px; }
+  .result-box,.error-box { font-size:11px; max-height:150px; }
+}
 /* 登录页 */
 .login-page { flex:1; display:flex; align-items:center; justify-content:center; background:var(--bg); }
 .login-card { background:var(--sidebar); border:1px solid var(--border); border-radius:12px; padding:40px; width:400px; max-width:90vw; box-shadow:0 4px 24px rgba(0,0,0,.3); }
@@ -378,6 +427,8 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var
 
 <!-- 主应用 -->
 <div id="appMain">
+<button class="hamburger" id="hamburgerBtn" onclick="toggleSidebar()" title="菜单">☰</button>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 <div class="sidebar">
   <div class="sidebar-header"><h1>SmartAgent</h1><p>智能 AI 助手</p></div>
   <div class="sidebar-section model-selector">
@@ -553,6 +604,14 @@ const api = (url, opts) => {
 function formatTime(ts) { if(!ts) return '-'; const d=new Date(ts); return d.toLocaleString('zh-CN'); }
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+// ==================== 移动端侧边栏 ====================
+function toggleSidebar() {
+  const sb = document.querySelector('.sidebar');
+  const ov = document.getElementById('sidebarOverlay');
+  const isOpen = sb.classList.toggle('open');
+  ov.classList.toggle('show', isOpen);
+}
 
 // ==================== 文件下载 / 预览 ====================
 async function downloadFile(filepath) {
